@@ -1,0 +1,114 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <h5 class="page-title mb-0"><i class="fas fa-user-tie" style="color:#007aff;margin-right:8px"></i> 教师管理</h5>
+    {% if current_user and current_user.role == 'admin' %}
+    <button class="btn btn-primary btn-sm" data-bs-toggle="modal" data-bs-target="#addModal"><i class="fas fa-plus"></i> 添加教师</button>
+    {% endif %}
+</div>
+<div class="row g-2 mb-3">
+    <div class="col-6 col-md-3"><div class="card stat-card text-center h-100"><div class="number" style="color:#007aff">{{ stats.total }}</div><div class="label">教师总数</div></div></div>
+    <div class="col-6 col-md-3"><div class="card stat-card text-center h-100"><div class="number" style="color:#34c759">{{ stats.active }}</div><div class="label">在职</div></div></div>
+    <div class="col-6 col-md-3"><div class="card stat-card text-center h-100"><div class="number" style="color:#ff9500">{{ stats.culture }}</div><div class="label">文化课教师</div></div></div>
+    <div class="col-6 col-md-3"><div class="card stat-card text-center h-100"><div class="number" style="color:#af52de">{{ stats.major }}</div><div class="label">专业课教师</div></div></div>
+</div>
+<form method="get" action="/teachers" class="d-flex gap-2 flex-wrap align-items-center mb-3 no-print">
+    <input type="text" name="kw" class="form-control form-control-sm" placeholder="姓名" value="{{ kw }}" style="width:120px">
+    <select name="position" class="form-select form-select-sm" style="width:130px">
+        <option value="">全部职务</option>
+        {% for p in positions %}<option value="{{ p }}" {% if pos == p %}selected{% endif %}>{{ p }}</option>{% endfor %}
+    </select>
+    <select name="category" class="form-select form-select-sm" style="width:130px">
+        <option value="">全部学科类别</option>
+        <option value="文化课" {% if cat == '文化课' %}selected{% endif %}>文化课</option>
+        <option value="专业课" {% if cat == '专业课' %}selected{% endif %}>专业课</option>
+        <option value="实训课" {% if cat == '实训课' %}selected{% endif %}>实训课</option>
+        <option value="公共课" {% if cat == '公共课' %}selected{% endif %}>公共课</option>
+        <option value="体育" {% if cat == '体育' %}selected{% endif %}>体育</option>
+    </select>
+    <select name="active" class="form-select form-select-sm" style="width:110px">
+        <option value="">全部状态</option>
+        <option value="1" {% if act == '1' %}selected{% endif %}>在职</option>
+        <option value="0" {% if act == '0' %}selected{% endif %}>离职</option>
+    </select>
+    <button class="btn btn-sm btn-outline-primary"><i class="fas fa-filter"></i> 筛选</button>
+    {% if kw or pos or cat or act %}<a href="/teachers" class="btn btn-sm btn-outline-secondary">清除</a>{% endif %}
+</form>
+<div class="card">
+    <div class="table-responsive">
+        <table class="table table-hover table-sm table-sortable" id="teachersTable">
+            <thead>
+                <tr>
+                    <th style="width:60px">#</th>
+                    <th>姓名</th><th>职务</th><th>学科类别</th><th>电话</th><th>状态</th><th>备注</th>
+                    {% if current_user and current_user.role == 'admin' %}<th style="width:120px" data-no-sort>操作</th>{% endif %}
+                </tr>
+            </thead>
+            <tbody>
+                {% for r in rows %}
+                <tr>
+                    <td>{{ loop.index }}</td>
+                    <td>{{ r.name }}</td><td>{{ r.position }}</td><td>{{ r.subject_category }}</td><td>{{ r.phone }}</td><td>{% if r.is_active %}<span class="badge" style="background:#34c759">在职</span>{% else %}<span class="badge" style="background:#86868b">停用</span>{% endif %}</td><td>{{ r.remark }}</td>
+                    {% if current_user and current_user.role == 'admin' %}
+                    <td>
+                        <button class="btn btn-sm btn-outline-primary" data-bs-toggle="modal" data-bs-target="#editModal{{ r.id }}"><i class="fas fa-edit"></i></button>
+                        <button class="btn btn-sm btn-outline-danger" onclick="postDelete('/teachers/{{ r.id }}/delete', {{ r.name|tojson|forceescape }})"><i class="fas fa-trash"></i></button>
+                    </td>
+                    {% endif %}
+                </tr>
+                {% else %}
+                <tr><td colspan="10" class="text-center text-muted py-4">暂无教师</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+{% if current_user and current_user.role == 'admin' %}
+<div class="modal fade" id="addModal" tabindex="-1">
+    <div class="modal-dialog modal-sm">
+        <form class="modal-content" method="post" action="/teachers/add">
+            <div class="modal-header"><h6 class="modal-title">添加教师</h6><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+            <div class="modal-body">
+<div class="mb-2"><label class="form-label">姓名</label><input class="form-control form-control-sm" name="name" required></div>
+<div class="mb-2"><label class="form-label">职务</label><select class="form-select form-select-sm" name="position"><option>专任教师</option><option>教研室主任</option><option>中层管理</option><option>行政兼课</option></select></div>
+<div class="mb-2"><label class="form-label">学科类别</label><select class="form-select form-select-sm" name="subject_category"><option>文化课</option><option selected>专业课</option><option>实训课</option><option>公共课</option><option>体育</option></select></div>
+<div class="mb-2"><label class="form-label">电话</label><input type="text" class="form-control form-control-sm" name="phone"></div>
+<div class="mb-2"><label class="form-label">备注</label><input type="text" class="form-control form-control-sm" name="remark"></div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-sm btn-secondary" data-bs-dismiss="modal">取消</button>
+                <button type="submit" class="btn btn-sm btn-primary">保存</button>
+            </div>
+        </form>
+    </div>
+</div>
+{% endif %}
+
+<div class="mb-4">
+{% if current_user and current_user.role == 'admin' %}
+{% for r in rows %}
+<div class="modal fade" id="editModal{{ r.id }}" tabindex="-1">
+    <div class="modal-dialog modal-sm">
+        <form class="modal-content" method="post" action="/teachers/{{ r.id }}/edit">
+            <div class="modal-header"><h6 class="modal-title">编辑教师</h6><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+            <div class="modal-body">
+<div class="mb-2"><label class="form-label">姓名</label><input type="text" class="form-control form-control-sm" name="name" value="{{ r.name }}"></div>
+<div class="mb-2"><label class="form-label">职务</label><select class="form-select form-select-sm" name="position">{% for p in ["专任教师","教研室主任","中层管理","行政兼课"] %}<option{% if r.position == p %} selected{% endif %}>{{ p }}</option>{% endfor %}</select></div>
+<div class="mb-2"><label class="form-label">学科类别</label><select class="form-select form-select-sm" name="subject_category">{% for c in ["文化课","专业课","实训课","公共课","体育"] %}<option{% if r.subject_category == c %} selected{% endif %}>{{ c }}</option>{% endfor %}</select></div>
+<div class="mb-2"><label class="form-label">电话</label><input type="text" class="form-control form-control-sm" name="phone" value="{{ r.phone }}"></div>
+<div class="mb-2"><label class="form-label">备注</label><input type="text" class="form-control form-control-sm" name="remark" value="{{ r.remark }}"></div>
+<div class="form-check mb-2"><input class="form-check-input" type="checkbox" name="is_active" id="ia{{ r.id }}"{% if r.is_active %} checked{% endif %}><label class="form-check-label" for="ia{{ r.id }}">在职</label></div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-sm btn-secondary" data-bs-dismiss="modal">取消</button>
+                <button type="submit" class="btn btn-sm btn-primary">保存</button>
+            </div>
+        </form>
+    </div>
+</div>
+{% endfor %}
+{% endif %}
+    </div>
+{% include '_pagination.html' %}
+{% endblock %}

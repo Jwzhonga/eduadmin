@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <h5 class="page-title mb-0"><i class="fas fa-money-bill-wave" style="color:#007aff;margin-right:8px"></i> 调课补助统计</h5>
+    <a href="/leaves" class="btn btn-sm btn-outline-secondary"><i class="fas fa-arrow-left"></i> 调课登记</a>
+</div>
+
+<div class="card mb-3">
+    <div class="card-body d-flex align-items-center gap-3 py-3">
+        <span style="font-size:13px;color:#86868b">本学期待发补助合计</span>
+        <span class="badge text-bg-success" style="font-size:16px">{{ '%.2f'|format(total) }} 元</span>
+        <span class="text-muted" style="font-size:12px">（顶课教师按节数 × {{ '%.0f'|format(watch_unit) if watch_unit else '' }} 元/节）</span>
+    </div>
+</div>
+
+<div class="card">
+    <div class="table-responsive">
+        <table class="table table-hover table-sm" style="font-size:13px">
+            <thead><tr>
+                <th style="width:50px">#</th>
+                <th>顶课教师</th>
+                <th>调课次数</th>
+                <th>节数</th>
+                <th>补助金额(元)</th>
+            </tr></thead>
+            <tbody>
+                {% for it in items %}
+                <tr>
+                    <td>{{ loop.index }}</td>
+                    <td>{{ it.name }}</td>
+                    <td>{{ it.count }}</td>
+                    <td>{{ it.periods }}</td>
+                    <td><strong>{{ '%.2f'|format(it.amount) }}</strong></td>
+                </tr>
+                {% else %}
+                <tr><td colspan="5" class="text-center text-muted py-4">暂无调课补助数据</td></tr>
+                {% endfor %}
+            </tbody>
+            <tfoot>
+                <tr class="table-light">
+                    <td colspan="4" class="text-end"><strong>合计</strong></td>
+                    <td><strong>{{ '%.2f'|format(total) }}</strong></td>
+                </tr>
+            </tfoot>
+        </table>
+    </div>
+</div>
+{% endblock %}

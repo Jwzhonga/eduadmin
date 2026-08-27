@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+    <h5 class="page-title mb-0"><i class="fas fa-history" style="color:#007aff;margin-right:8px"></i> 操作日志</h5>
+    <form method="get" action="/logs" class="d-flex gap-1 align-items-center">
+        <select name="module" class="form-select form-select-sm" style="width:120px" onchange="this.form.submit()">
+            <option value="">全部模块</option>
+            {% for m in modules %}<option value="{{ m }}" {% if mod == m %}selected{% endif %}>{{ m }}</option>{% endfor %}
+        </select>
+        <input type="text" name="q" class="form-control form-control-sm" placeholder="搜索人员/内容" value="{{ kw }}" style="width:160px">
+        <button class="btn btn-sm btn-outline-primary"><i class="fas fa-search"></i></button>
+    </form>
+</div>
+
+<div class="card">
+    <div class="table-responsive">
+        <table class="table table-hover table-sm">
+            <thead>
+                <tr><th style="width:60px">#</th><th>时间</th><th>操作人</th><th>模块</th><th>操作</th><th>内容</th></tr>
+            </thead>
+            <tbody>
+                {% for r in rows %}
+                <tr>
+                    <td>{{ loop.index + (page-1)*50 }}</td>
+                    <td style="font-size:12px">{{ r.created_at.strftime('%m-%d %H:%M') }}</td>
+                    <td>{{ r.username or '—' }}</td>
+                    <td><span class="badge text-bg-light border">{{ r.module or '—' }}</span></td>
+                    <td>
+                        {% if r.action == 'login' %}<span class="badge text-bg-success">登录</span>
+                        {% elif r.action == 'logout' %}<span class="badge text-bg-secondary">退出</span>
+                        {% elif r.action == 'delete' %}<span class="badge text-bg-danger">删除</span>
+                        {% elif r.action == 'add' %}<span class="badge text-bg-primary">新增</span>
+                        {% else %}<span class="badge text-bg-warning">修改</span>{% endif %}
+                    </td>
+                    <td class="text-muted" style="font-size:13px">{{ r.detail or '—' }}</td>
+                </tr>
+                {% else %}
+                <tr><td colspan="6" class="text-center text-muted py-4">暂无日志</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% include '_pagination.html' %}
+{% endblock %}

@@ -1,0 +1,153 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+    <h5 class="page-title mb-0"><i class="fas fa-arrows-alt-h" style="color:#007aff;margin-right:8px"></i> 调课登记</h5>
+    <div class="d-flex gap-2 align-items-center">
+        <div class="btn-group btn-group-sm">
+            <a class="btn btn-outline-secondary" href="/leaves?month={{ prev_month }}"><i class="fas fa-chevron-left"></i></a>
+            <span class="btn btn-outline-secondary" style="min-width:110px">{{ cur_month }}</span>
+            <a class="btn btn-outline-secondary" href="/leaves?month={{ nxt_month }}"><i class="fas fa-chevron-right"></i></a>
+            <a class="btn btn-outline-secondary" href="/leaves">本月</a>
+            <a class="btn btn-outline-secondary" href="/leaves?month=all">全部</a>
+        </div>
+        <a href="/leaves/stats" class="btn btn-sm btn-outline-primary"><i class="fas fa-chart-bar"></i> 顶课补助统计</a>
+        {% if current_user and current_user.role == 'admin' %}
+        <button class="btn btn-primary btn-sm" data-bs-toggle="modal" data-bs-target="#addModal"><i class="fas fa-plus"></i> 添加调课</button>
+        {% endif %}
+    </div>
+</div>
+
+<div class="alert alert-light border" style="border-radius:12px;font-size:13px;color:#515154">
+    <i class="fas fa-info-circle" style="color:#007aff"></i>
+    添加调课：选择请假教师、调课日期、节次和<strong>调给谁</strong>（顶课教师），保存即生效；
+    顶课教师自动按节数生成补助（{{ watch_unit }} 元/节，可在系统设置调整）。
+</div>
+
+<div class="card">
+    <div class="table-responsive">
+        <table class="table table-hover table-sm">
+            <thead>
+                <tr>
+                    <th style="width:50px">#</th>
+                    <th>调课日期</th>
+                    <th>请假教师</th>
+                    <th>节次</th>
+                    <th>调给谁</th>
+                    <th>补助(元)</th>
+                    <th>原因</th>
+                    {% if current_user and current_user.role == 'admin' %}<th style="width:110px">操作</th>{% endif %}
+                </tr>
+            </thead>
+            <tbody>
+                {% for r in rows %}
+                <tr>
+                    <td>{{ loop.index }}</td>
+                    <td>{{ r.leave_date.strftime('%Y-%m-%d') }}</td>
+                    <td>{{ teacher_name(r.teacher_id) }}</td>
+                    <td>{% for p in r.period_list() %}<span class="badge text-bg-light border">{{ p }}节</span> {% endfor %}</td>
+                    <td>{% if r.watch_teacher_id %}<span class="badge text-bg-success">{{ teacher_name(r.watch_teacher_id) }}</span>{% else %}<span class="text-muted">—</span>{% endif %}</td>
+                    <td>{{ '%.2f'|format(r.watch_amount or 0) }}</td>
+                    <td class="text-muted" style="font-size:12px">{{ r.reason or '—' }}</td>
+                    {% if current_user and current_user.role == 'admin' %}
+                    <td>
+                        <button class="btn btn-sm btn-outline-primary" data-bs-toggle="modal" data-bs-target="#editModal{{ r.id }}"><i class="fas fa-edit"></i></button>
+                        <button class="btn btn-sm btn-outline-danger" onclick="postDelete('/leaves/{{ r.id }}/delete', {{ r.leave_date.strftime('%m-%d')|tojson|forceescape }})"><i class="fas fa-trash"></i></button>
+                    </td>
+                    {% endif %}
+                </tr>
+                {% else %}
+                <tr><td colspan="{{ 8 if current_user and current_user.role == 'admin' else 7 }}" class="text-center text-muted py-5">暂无调课记录，点右上「添加调课」登记</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<!-- 添加调课 -->
+<div class="modal fade" id="addModal" tabindex="-1">
+    <div class="modal-dialog">
+        <form class="modal-content" method="post" action="/leaves/add">
+            <div class="modal-header"><h6 class="modal-title"><i class="fas fa-plus"></i> 添加调课</h6><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+            <div class="modal-body">
+                <div class="mb-2"><label class="form-label">请假教师</label>
+                    <select name="teacher_id" class="form-select form-select-sm" required>
+                        <option value="">请选择</option>
+                        {% for t in teachers %}<option value="{{ t.id }}">{{ t.name }}</option>{% endfor %}
+                    </select>
+                </div>
+                <div class="mb-2"><label class="form-label">调课日期</label>
+                    <input type="date" name="leave_date" class="form-control form-control-sm" required>
+                </div>
+                <div class="mb-2"><label class="form-label">节次（可多选）</label>
+                    <div class="d-flex flex-wrap gap-2">
+                        {% for p in range(1, periods_per_day + 1) %}
+                        <label class="form-check form-check-inline" style="font-size:13px">
+                            <input class="form-check-input" type="checkbox" name="periods" value="{{ p }}"> {{ p }}节
+                        </label>
+                        {% endfor %}
+                    </div>
+                </div>
+                <div class="mb-2"><label class="form-label">调给谁（顶课教师）</label>
+                    <select name="watch_teacher_id" class="form-select form-select-sm">
+                        <option value="">（不指定）</option>
+                        {% for t in teachers %}<option value="{{ t.id }}">{{ t.name }}</option>{% endfor %}
+                    </select>
+                </div>
+                <div class="mb-2"><label class="form-label">原因</label>
+                    <input type="text" name="reason" class="form-control form-control-sm" placeholder="如：外出培训">
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-sm btn-secondary" data-bs-dismiss="modal">取消</button>
+                <button type="submit" class="btn btn-sm btn-primary">保存（自动生成补助）</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- 编辑调课 -->
+{% for r in rows %}
+{% if current_user and current_user.role == 'admin' %}
+<div class="modal fade" id="editModal{{ r.id }}" tabindex="-1">
+    <div class="modal-dialog">
+        <form class="modal-content" method="post" action="/leaves/{{ r.id }}/edit">
+            <div class="modal-header"><h6 class="modal-title">编辑调课（{{ r.leave_date.strftime('%m-%d') }}）</h6><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+            <div class="modal-body">
+                <div class="mb-2"><label class="form-label">请假教师</label>
+                    <select name="teacher_id" class="form-select form-select-sm">
+                        {% for t in teachers %}<option value="{{ t.id }}" {% if r.teacher_id == t.id %}selected{% endif %}>{{ t.name }}</option>{% endfor %}
+                    </select>
+                </div>
+                <div class="mb-2"><label class="form-label">调课日期</label>
+                    <input type="date" name="leave_date" class="form-control form-control-sm" value="{{ r.leave_date.strftime('%Y-%m-%d') }}">
+                </div>
+                <div class="mb-2"><label class="form-label">节次（可多选）</label>
+                    <div class="d-flex flex-wrap gap-2">
+                        {% set cur = r.period_list() %}
+                        {% for p in range(1, periods_per_day + 1) %}
+                        <label class="form-check form-check-inline" style="font-size:13px">
+                            <input class="form-check-input" type="checkbox" name="periods" value="{{ p }}" {% if p in cur %}checked{% endif %}> {{ p }}节
+                        </label>
+                        {% endfor %}
+                    </div>
+                </div>
+                <div class="mb-2"><label class="form-label">调给谁（顶课教师）</label>
+                    <select name="watch_teacher_id" class="form-select form-select-sm">
+                        <option value="">（不指定）</option>
+                        {% for t in teachers %}<option value="{{ t.id }}" {% if r.watch_teacher_id == t.id %}selected{% endif %}>{{ t.name }}</option>{% endfor %}
+                    </select>
+                </div>
+                <div class="mb-2"><label class="form-label">原因</label>
+                    <input type="text" name="reason" class="form-control form-control-sm" value="{{ r.reason }}">
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-sm btn-secondary" data-bs-dismiss="modal">取消</button>
+                <button type="submit" class="btn btn-sm btn-primary">保存</button>
+            </div>
+        </form>
+    </div>
+</div>
+{% endif %}
+{% endfor %}
+{% endblock %}

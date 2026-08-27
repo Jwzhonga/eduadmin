@@ -1,0 +1,122 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+    <h5 class="page-title mb-0"><i class="fas fa-chart-bar" style="color:#007aff;margin-right:8px"></i> 超课时统计</h5>
+    <div class="d-flex gap-2 align-items-center">
+        <div class="btn-group btn-group-sm">
+            <a class="btn {% if view == 'period' %}btn-primary{% else %}btn-outline-secondary{% endif %}" href="/workload?view=period">按4周周期</a>
+            <a class="btn {% if view == 'week' %}btn-primary{% else %}btn-outline-secondary{% endif %}" href="/workload?view=week">按整学期</a>
+        </div>
+        <a href="/workload/export" class="btn btn-sm btn-success"><i class="fas fa-file-excel"></i> 导出</a>
+    </div>
+</div>
+
+{% if not rows and view == 'week' %}
+<div class="alert alert-light border text-center py-4 text-muted" style="border-radius:12px">
+    <i class="fas fa-info-circle"></i> 暂无统计数据，请先导入课表（数据管理 → 统一导入）
+</div>
+{% endif %}
+
+<div class="card">
+    {% if view == 'period' %}
+    <div class="card-body py-2 d-flex align-items-center gap-2 flex-wrap">
+        <span class="text-muted" style="font-size:13px">周期：</span>
+        <div class="btn-group btn-group-sm">
+            {% for p in period_nos %}
+            <a class="btn {% if p == cur_period %}btn-primary{% else %}btn-outline-secondary{% endif %}" href="/workload?view=period&period={{ p }}">第{{ p }}周期</a>
+            {% endfor %}
+        </div>
+        {% if p_weeks %}
+        <span class="text-muted" style="font-size:12px">{{ p_weeks[0][1].strftime('%m-%d') }} ~ {{ p_weeks[0][2].strftime('%m-%d') }}（有效 {{ p_weeks[0][3] }} 周）</span>
+        {% endif %}
+        <span class="ms-auto" style="font-size:13px">
+            <span class="badge text-bg-primary">超课时 {{ total_extra }} 节</span>
+            <span class="badge text-bg-success">金额 {{ total_amount }} 元</span>
+        </span>
+    </div>
+    <div class="table-responsive">
+        <table class="table table-hover table-sm" style="font-size:13px">
+            <thead><tr>
+                <th style="width:50px">#</th>
+                <th>教师</th>
+                <th>职务</th>
+                <th>周课时</th>
+                <th>周期实际课时</th>
+                <th>周期标准课时</th>
+                <th>超课时</th>
+                <th>金额(元)</th>
+            </tr></thead>
+            <tbody>
+                {% for r in rows %}
+                <tr>
+                    <td>{{ loop.index }}</td>
+                    <td>{{ r.teacher.name }}</td>
+                    <td>{{ r.teacher.position or '' }}</td>
+                    <td>{{ r.weekly_raw }}</td>
+                    <td>{{ r.actual }}</td>
+                    <td>{{ r.std_total }}</td>
+                    <td><strong>{{ r.extra }}</strong></td>
+                    <td>{{ r.amount }}</td>
+                </tr>
+                {% else %}
+                <tr><td colspan="8" class="text-center text-muted py-4">本周期暂无数据</td></tr>
+                {% endfor %}
+            </tbody>
+            <tfoot>
+                <tr class="table-light">
+                    <td colspan="6" class="text-end"><strong>合计</strong></td>
+                    <td><strong>{{ total_extra }}</strong></td>
+                    <td><strong>{{ total_amount }}</strong></td>
+                </tr>
+            </tfoot>
+        </table>
+    </div>
+    {% else %}
+    <div class="table-responsive">
+        <table class="table table-hover table-sm" style="font-size:13px">
+            <thead><tr>
+                <th style="width:50px">#</th>
+                <th>教师</th>
+                <th>职务</th>
+                <th>学科类别</th>
+                <th>周课时</th>
+                <th>有效周数</th>
+                <th>学期实际课时</th>
+                <th>请假扣减</th>
+                <th>职务周标准</th>
+                <th>标准课时</th>
+                <th>超课时</th>
+                <th>金额(元)</th>
+            </tr></thead>
+            <tbody>
+                {% for r in rows %}
+                <tr>
+                    <td>{{ loop.index }}</td>
+                    <td>{{ r.teacher.name }}</td>
+                    <td>{{ r.teacher.position or '' }}</td>
+                    <td>{{ r.teacher.subject_category or '' }}</td>
+                    <td>{{ r.weekly_raw }}</td>
+                    <td>{{ r.weeks }}</td>
+                    <td>{{ r.actual }}</td>
+                    <td>{{ r.leave_periods }}</td>
+                    <td>{{ r.std_weekly }}</td>
+                    <td>{{ r.std_total }}</td>
+                    <td><strong>{{ r.extra }}</strong></td>
+                    <td>{{ r.amount }}</td>
+                </tr>
+                {% else %}
+                <tr><td colspan="12" class="text-center text-muted py-4">暂无数据</td></tr>
+                {% endfor %}
+            </tbody>
+            <tfoot>
+                <tr class="table-light">
+                    <td colspan="10" class="text-end"><strong>合计</strong></td>
+                    <td><strong>{{ total_extra }}</strong></td>
+                    <td><strong>{{ total_amount }}</strong></td>
+                </tr>
+            </tfoot>
+        </table>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}

@@ -1,0 +1,114 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <h5 class="page-title mb-0"><i class="fas fa-hand-holding" style="color:#007aff;margin-right:8px"></i> 发书记录（班级发书 / 教师教本）</h5>
+    {% if current_user and current_user.role == 'admin' %}
+    <button class="btn btn-primary btn-sm" data-bs-toggle="modal" data-bs-target="#addModal"><i class="fas fa-plus"></i> 登记发书</button>
+    {% endif %}
+</div>
+<div class="card">
+    <div class="table-responsive">
+        <table class="table table-hover table-sm table-sortable" id="issuesTable">
+            <thead>
+                <tr>
+                    <th style="width:60px">#</th>
+                    <th>类型</th>
+                    <th>领取对象</th>
+                    <th>教材</th>
+                    <th>数量</th>
+                    <th>金额(元)</th>
+                    <th>签收人</th>
+                    <th>发放日期</th>
+                    <th>备注</th>
+                    {% if current_user and current_user.role == 'admin' %}<th style="width:80px" data-no-sort>操作</th>{% endif %}
+                </tr>
+            </thead>
+            <tbody>
+                {% for r in rows %}
+                {% set tb = textbooks | selectattr('id', 'equalto', r.textbook_id) | first %}
+                <tr>
+                    <td>{{ loop.index }}</td>
+                    <td>
+                        {% if r.issue_type == 'class' %}<span class="badge text-bg-primary">班级发书</span>
+                        {% else %}<span class="badge text-bg-success">教师教本</span>{% endif %}
+                    </td>
+                    <td>
+                        {% if r.issue_type == 'class' %}
+                            {% for c in classes %}{% if c.id == r.class_id %}{{ c.name }}{% endif %}{% endfor %}
+                        {% else %}
+                            {% for t in teachers %}{% if t.id == r.teacher_id %}{{ t.name }}{% endif %}{% endfor %}
+                        {% endif %}
+                    </td>
+                    <td>{{ tb.name if tb else '#' ~ r.textbook_id }}</td>
+                    <td>{{ r.quantity }}</td>
+                    <td>{{ '%.2f'|format(r.quantity * (tb.price if tb else 0)) }}</td>
+                    <td>{{ r.signer }}</td>
+                    <td>{{ r.issue_date.strftime('%Y-%m-%d') }}</td>
+                    <td>{{ r.remark }}</td>
+                    {% if current_user and current_user.role == 'admin' %}
+                    <td>
+                        <button class="btn btn-sm btn-outline-danger" onclick="postDelete('/issues/{{ r.id }}/delete','确定删除该发书记录？')"><i class="fas fa-trash"></i></button>
+                    </td>
+                    {% endif %}
+                </tr>
+                {% else %}
+                <tr><td colspan="10" class="text-center text-muted py-4">暂无发书记录，点击右上角「登记发书」开始</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+{% if current_user and current_user.role == 'admin' %}
+<div class="modal fade" id="addModal" tabindex="-1">
+    <div class="modal-dialog modal-sm">
+        <form class="modal-content" method="post" action="/issues/add">
+            <div class="modal-header"><h6 class="modal-title">登记发书</h6><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+            <div class="modal-body">
+                <div class="mb-2">
+                    <label class="form-label">发放类型</label>
+                    <div class="d-flex gap-3">
+                        <div class="form-check">
+                            <input class="form-check-input" type="radio" name="issue_type" value="class" id="itClass" checked onchange="document.getElementById('classWrap').style.display='block';document.getElementById('teacherWrap').style.display='none'">
+                            <label class="form-check-label" for="itClass" style="font-size:13px">班级发书</label>
+                        </div>
+                        <div class="form-check">
+                            <input class="form-check-input" type="radio" name="issue_type" value="teacher" id="itTeacher" onchange="document.getElementById('classWrap').style.display='none';document.getElementById('teacherWrap').style.display='block'">
+                            <label class="form-check-label" for="itTeacher" style="font-size:13px">教师教本</label>
+                        </div>
+                    </div>
+                </div>
+                <div class="mb-2" id="classWrap">
+                    <label class="form-label">班级（数量留空自动按在籍人数）</label>
+                    <select class="form-select form-select-sm" name="class_id">
+                        <option value="">— 请选择 —</option>
+                        {% for c in classes %}<option value="{{ c.id }}">{{ c.name }}（{{ c.student_count }}人）</option>{% endfor %}
+                    </select>
+                </div>
+                <div class="mb-2" id="teacherWrap" style="display:none">
+                    <label class="form-label">教师（数量留空默认1本）</label>
+                    <select class="form-select form-select-sm" name="teacher_id">
+                        <option value="">— 请选择 —</option>
+                        {% for t in teachers %}<option value="{{ t.id }}">{{ t.name }}</option>{% endfor %}
+                    </select>
+                </div>
+                <div class="mb-2"><label class="form-label">教材</label>
+                    <select class="form-select form-select-sm" name="textbook_id" required>
+                        <option value="">— 请选择 —</option>
+                        {% for t in textbooks %}<option value="{{ t.id }}">{{ t.name }}</option>{% endfor %}
+                    </select>
+                </div>
+                <div class="mb-2"><label class="form-label">数量</label><input type="number" class="form-control form-control-sm" name="quantity" value="0"></div>
+                <div class="mb-2"><label class="form-label">签收人</label><input class="form-control form-control-sm" name="signer" placeholder="领取人签名"></div>
+                <div class="mb-2"><label class="form-label">发放日期</label><input type="date" class="form-control form-control-sm" name="issue_date" value="{{ now().strftime('%Y-%m-%d') }}"></div>
+                <div class="mb-2"><label class="form-label">备注</label><input class="form-control form-control-sm" name="remark"></div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-sm btn-secondary" data-bs-dismiss="modal">取消</button>
+                <button type="submit" class="btn btn-sm btn-primary">保存</button>
+            </div>
+        </form>
+    </div>
+</div>
+{% endif %}
+{% endblock %}

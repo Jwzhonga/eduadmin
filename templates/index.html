@@ -1,0 +1,97 @@
+{% extends "base.html" %}
+{% block content %}
+{% if not stats %}
+<div class="card"><div class="card-body text-center py-5 text-muted">
+    <i class="fas fa-calendar-plus" style="font-size:40px;color:#c7c7cc"></i>
+    <p class="mt-3 mb-1">还没有学期，先创建新学期开始使用</p>
+    <button class="btn btn-primary btn-sm mt-2" onclick="showNewSemester()"><i class="fas fa-plus"></i> 新建学期</button>
+</div></div>
+{% else %}
+<!-- 快捷入口 -->
+<div class="row g-2 mb-3">
+    {% set quick = [
+        ('/data', 'fa-file-import', '统一导入', '#007aff'),
+        ('/night', 'fa-moon', '夜自习', '#af52de'),
+        ('/schedule', 'fa-table', '课表查看', '#34c759'),
+        ('/reports', 'fa-file-invoice-dollar', '综合报表', '#ff9500'),
+    ] %}
+    {% for url, icon, label, color in quick %}
+    <div class="col-6 col-md-3">
+        <a href="{{ url }}" class="card stat-card text-center h-100 text-decoration-none" style="color:{{ color }};border:1px solid #e5e5ea">
+            <div class="py-3"><i class="fas {{ icon }}" style="font-size:22px;color:{{ color }}"></i></div>
+            <div class="label" style="color:#1d1d1f">{{ label }}</div>
+        </a>
+    </div>
+    {% endfor %}
+</div>
+
+<!-- 学期概览 -->
+<div class="row g-2 mb-3">
+    {% set overview = [
+        ('班级', stats.classes, '#007aff'), ('在职教师', stats.teachers, '#34c759'),
+        ('课程', stats.courses, '#ff9500'), ('教室', stats.rooms, '#af52de'),
+        ('教学任务', stats.tasks, '#5856d6'), ('课表格子', stats.cells, '#00c7be'),
+    ] %}
+    {% for label, val, color in overview %}
+    <div class="col-6 col-md-2">
+        <div class="card stat-card text-center h-100">
+            <div class="number" style="color:{{ color }}">{{ val }}</div>
+            <div class="label">{{ label }}</div>
+        </div>
+    </div>
+    {% endfor %}
+</div>
+
+<div class="row g-3">
+    <!-- 待办事项 -->
+    <div class="col-lg-5">
+        <div class="card h-100">
+            <div class="card-header" style="padding:12px 16px"><i class="fas fa-tasks" style="color:#ff9500;margin-right:6px"></i> 待办事项</div>
+            <div class="card-body p-2">
+                {% if todos %}
+                {% for title, desc, url, icon in todos %}
+                <a href="{{ url }}" class="d-flex justify-content-between align-items-center px-3 py-2 text-decoration-none" style="color:#1d1d1f;border-bottom:1px solid #f5f5f7">
+                    <span><i class="fas {{ icon }}" style="color:#ff9500;width:20px"></i> {{ title }}</span>
+                    <span class="badge text-bg-warning">{{ desc }}</span>
+                </a>
+                {% endfor %}
+                {% else %}
+                <div class="text-center text-muted py-4" style="font-size:13px">
+                    <i class="fas fa-check-circle" style="color:#34c759;font-size:26px"></i>
+                    <p class="mt-2 mb-0">暂无待办事项</p>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+    <!-- 模块速览 -->
+    <div class="col-lg-7">
+        <div class="card h-100">
+            <div class="card-header" style="padding:12px 16px"><i class="fas fa-chart-pie" style="color:#007aff;margin-right:6px"></i> 本期速览</div>
+            <div class="card-body">
+                <div class="row g-2">
+                    {% set items = [
+                        ('请假待审批', stats.pending_leaves, '/leaves'),
+                        ('本周夜自习', stats.night_week, '/night'),
+                        ('征订待处理', stats.orders_draft, '/orders'),
+                        ('发书记录', stats.issues, '/issues'),
+                        ('停课日', stats.holidays, '/holidays'),
+                        ('加班记录', stats.overtimes, '/overtimes'),
+                        ('加班金额(元)', stats.ot_amount, '/overtimes'),
+                        ('管理费(元)', stats.fee_amount, '/fees'),
+                    ] %}
+                    {% for label, val, url in items %}
+                    <div class="col-6 col-md-3">
+                        <a href="{{ url }}" class="card stat-card text-center h-100 text-decoration-none">
+                            <div class="number" style="color:#007aff">{{ val }}</div>
+                            <div class="label">{{ label }}</div>
+                        </a>
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endif %}
+{% endblock %}

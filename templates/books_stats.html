@@ -1,0 +1,81 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <h5 class="page-title mb-0"><i class="fas fa-chart-pie" style="color:#007aff;margin-right:8px"></i> 教材发放统计</h5>
+    <a href="/books/stats/export" class="btn btn-success btn-sm"><i class="fas fa-file-excel"></i> 导出Excel</a>
+</div>
+
+<div class="row g-3 mb-3">
+    <div class="col-6 col-md-3">
+        <div class="card stat-card text-center h-100">
+            <div class="number" style="color:#007aff">{{ total_qty }}</div>
+            <div class="label">发放总数量(本)</div>
+        </div>
+    </div>
+    <div class="col-6 col-md-3">
+        <div class="card stat-card text-center h-100">
+            <div class="number" style="color:#34c759">{{ teacher_qty }}</div>
+            <div class="label">教师教本记录(条)</div>
+        </div>
+    </div>
+    <div class="col-6 col-md-3">
+        <div class="card stat-card text-center h-100">
+            <div class="number" style="color:#ff9500">{{ textbook_count }}</div>
+            <div class="label">教材品种</div>
+        </div>
+    </div>
+    <div class="col-6 col-md-3">
+        <div class="card stat-card text-center h-100">
+            <div class="number" style="color:#af52de">¥{{ '%.2f'|format(total_cost) }}</div>
+            <div class="label">教材费用总额</div>
+        </div>
+    </div>
+</div>
+
+<div class="row g-3">
+    <div class="col-lg-7">
+        <div class="card">
+            <div class="card-header"><i class="fas fa-book"></i> 按教材汇总</div>
+            <div class="table-responsive">
+                <table class="table table-hover table-sm">
+                    <thead><tr><th>教材</th><th>发放总数</th><th>班级发放</th><th>教师教本</th><th>金额(元)</th></tr></thead>
+                    <tbody>
+                        {% for b in book_rows %}
+                        <tr>
+                            <td>{{ b.name }}</td>
+                            <td>{{ b.qty }}</td>
+                            <td>{{ b.class_qty }}</td>
+                            <td>{{ b.teacher_qty }}</td>
+                            <td>{{ '%.2f'|format(b.cost) }}</td>
+                        </tr>
+                        {% else %}
+                        <tr><td colspan="5" class="text-center text-muted py-4">暂无发放数据</td></tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+    <div class="col-lg-5">
+        <div class="card">
+            <div class="card-header"><i class="fas fa-users"></i> 按班级汇总</div>
+            <div class="table-responsive">
+                <table class="table table-hover table-sm">
+                    <thead><tr><th>班级</th><th>发放数量</th><th>费用(元)</th></tr></thead>
+                    <tbody>
+                        {% for c in class_rows %}
+                        <tr>
+                            <td>{{ c.name }}</td>
+                            <td>{{ c.qty }}</td>
+                            <td>{{ '%.2f'|format(c.cost) }}</td>
+                        </tr>
+                        {% else %}
+                        <tr><td colspan="3" class="text-center text-muted py-4">暂无班级发书数据</td></tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

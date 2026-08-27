@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <h5 class="page-title mb-0"><i class="fas fa-file-import" style="color:#007aff;margin-right:8px"></i> 选择 Sheet 页</h5>
+    <a href="/night" class="btn btn-sm btn-outline-secondary"><i class="fas fa-times"></i> 取消</a>
+</div>
+
+<div class="alert alert-light border" style="border-radius:12px;font-size:13px;color:#515154">
+    <i class="fas fa-file-excel" style="color:#34c759"></i> 文件「{{ filename }}」共 {{ sheets|length }} 个 sheet，请选择包含排班安排的 sheet（如：安排表26下）。
+</div>
+
+<div class="card">
+    <div class="card-body">
+        <form method="post" action="/night/import/do">
+            <div class="mb-3">
+                <label class="form-label">选择 sheet</label>
+                <div class="d-flex flex-wrap gap-2">
+                    {% for sn in sheets %}
+                    <div class="form-check" style="min-width:140px">
+                        <input class="form-check-input" type="radio" name="sheet" value="{{ sn }}"
+                               id="sh{{ loop.index }}" {% if sn == last_sheet %}checked{% elif loop.last and not last_sheet %}checked{% endif %}>
+                        <label class="form-check-label" for="sh{{ loop.index }}">{{ sn }}{% if sn == last_sheet %} <span class="text-muted" style="font-size:11px">(上次)</span>{% endif %}</label>
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+            <div class="row g-2 mb-3" style="max-width:560px">
+                <div class="col-6">
+                    <label class="form-label">起始日期（该安排第 1 周的星期日）</label>
+                    <input type="date" name="start_date" class="form-control form-control-sm" required>
+                </div>
+                <div class="col-6">
+                    <label class="form-label">导入周数（按此安排重复 N 周）</label>
+                    <input type="number" name="weeks" class="form-control form-control-sm" value="{{ last_weeks or '1' }}" min="1" max="30">
+                </div>
+            </div>
+            <div class="small text-muted mb-3" style="font-size:12px">
+                格式要求：每行一个教室（楼层/教室号/班级/星期日~星期四 教师）。班级名自动匹配，未匹配的跳过并提示。
+            </div>
+            <button class="btn btn-primary btn-sm"><i class="fas fa-check"></i> 解析并导入</button>
+        </form>
+    </div>
+</div>
+{% endblock %}

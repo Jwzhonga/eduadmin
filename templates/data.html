@@ -1,0 +1,123 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+    <h5 class="page-title mb-0"><i class="fas fa-database" style="color:#007aff;margin-right:8px"></i> 数据管理</h5>
+    <div class="d-flex gap-2">
+        <button class="btn btn-sm btn-outline-primary" data-bs-toggle="modal" data-bs-target="#uploadModal"><i class="fas fa-upload"></i> 上传恢复</button>
+        <a href="/data/export" class="btn btn-sm btn-outline-secondary"><i class="fas fa-download"></i> 全量导出</a>
+        {% if current_user and current_user.role == 'admin' %}
+        <form method="post" action="/data/backup" class="d-inline">
+            <button class="btn btn-sm btn-primary"><i class="fas fa-save"></i> 立即备份</button>
+        </form>
+        {% endif %}
+    </div>
+</div>
+
+<div class="alert alert-light border" style="border-radius:12px;font-size:13px;color:#515154">
+    <i class="fas fa-info-circle" style="color:#007aff"></i>
+    数据库大小 <strong>{{ stats.db_size }}</strong>。备份为完整数据库快照（含全部学期与设置）；<strong>恢复/重置前都会自动备份当前数据</strong>，可随时回滚。
+</div>
+
+<h6 class="text-muted mt-3 mb-2" style="font-size:13px"><i class="fas fa-file-import"></i> 统一导入（全部导入入口）</h6>
+<div class="row g-2 mb-3">
+    <div class="col-md-6">
+        <div class="card h-100">
+            <div class="card-header" style="padding:8px 14px;font-size:13px"><i class="fas fa-school" style="color:#007aff"></i> 基础数据导入（班级/教师/课程/教学任务/课表）</div>
+            <div class="card-body">
+                <form method="post" action="/import/do" enctype="multipart/form-data" class="d-flex gap-2 flex-wrap">
+                    <input type="file" name="files" class="form-control form-control-sm" style="max-width:360px" multiple accept=".xlsx,.xls" required>
+                    <button class="btn btn-sm btn-primary"><i class="fas fa-upload"></i> 一键导入</button>
+                </form>
+                <div class="small text-muted mt-2">上传教务 Excel（班级课程计划表 / 教师课程计划表 / 班级课程表，可多选），自动识别并导入当前学期。</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-6">
+        <div class="card h-100">
+            <div class="card-header" style="padding:8px 14px;font-size:13px"><i class="fas fa-moon" style="color:#af52de"></i> 夜自习安排表导入</div>
+            <div class="card-body">
+                <form method="post" action="/night/import" enctype="multipart/form-data" class="d-flex gap-2 flex-wrap">
+                    <input type="file" name="file" class="form-control form-control-sm" style="max-width:280px" accept=".xlsx,.xls" required>
+                    <button class="btn btn-sm btn-primary"><i class="fas fa-upload"></i> 上传</button>
+                </form>
+                <div class="small text-muted mt-2">上传后选择 sheet、起始日期与周数，自动导入夜自习排班。</div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<h6 class="text-muted mt-3 mb-2" style="font-size:13px"><i class="fas fa-chart-pie"></i> 当前学期数据统计</h6>
+<div class="row g-2 mb-3">
+    {% for label, key in [('班级','classes'),('教师','teachers'),('课程','courses'),('教室','rooms'),('教材','textbooks'),('教学任务','tasks'),('课表格子','cells'),('征订','orders'),('发书','issues'),('调课','leaves'),('夜自习','night'),('加班','overtimes'),('管理费','fees'),('操作日志','logs')] %}
+    <div class="col-3 col-md-2 col-xl-1">
+        <div class="card stat-card text-center h-100">
+            <div class="number" style="font-size:18px;color:#007aff">{{ stats[key] }}</div>
+            <div class="label" style="font-size:11px">{{ label }}</div>
+        </div>
+    </div>
+    {% endfor %}
+</div>
+
+<h6 class="text-muted mb-2" style="font-size:13px"><i class="fas fa-history"></i> 备份列表（{{ backups|length }} 个）</h6>
+<div class="card">
+    <div class="table-responsive">
+        <table class="table table-hover table-sm" style="font-size:13px">
+            <thead><tr><th>文件名</th><th>大小</th><th>时间</th><th style="width:200px">操作</th></tr></thead>
+            <tbody>
+                {% for b in backups %}
+                <tr>
+                    <td style="font-family:monospace;font-size:12px">{{ b.name }}</td>
+                    <td>{{ b.size }}</td>
+                    <td>{{ b.mtime }}</td>
+                    <td>
+                        <a href="/data/backups/{{ b.name }}/download" class="btn btn-sm btn-outline-secondary"><i class="fas fa-download"></i></a>
+                        <form method="post" action="/data/restore/{{ b.name }}" class="d-inline" onsubmit="return confirm('从「{{ b.name }}」恢复将覆盖当前全部数据（恢复前自动备份）。确定？')">
+                            <button class="btn btn-sm btn-outline-primary" title="恢复此备份"><i class="fas fa-undo"></i></button>
+                        </form>
+                        <form method="post" action="/data/backups/{{ b.name }}/delete" class="d-inline" onsubmit="return confirm('删除备份「{{ b.name }}」？')">
+                            <button class="btn btn-sm btn-outline-danger"><i class="fas fa-trash"></i></button>
+                        </form>
+                    </td>
+                </tr>
+                {% else %}
+                <tr><td colspan="4" class="text-center text-muted py-4">暂无备份，点「立即备份」创建第一个</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+{% if current_user and current_user.role == 'admin' %}
+<div class="card mt-3 border-danger-subtle">
+    <div class="card-header text-danger" style="padding:10px 16px"><i class="fas fa-exclamation-triangle"></i> 危险操作：重置全部数据</div>
+    <div class="card-body">
+        <form method="post" action="/data/reset" class="d-flex gap-2 flex-wrap align-items-center">
+            <span style="font-size:13px">清空当前学期及全部历史业务数据（保留管理员账号）。输入「<strong>清空</strong>」确认：</span>
+            <input type="text" name="confirm" class="form-control form-control-sm" style="width:120px" placeholder="清空" required>
+            <button class="btn btn-sm btn-danger" onclick="return confirm('确定要清空全部数据？此操作不可撤销（重置前自动备份）。')"><i class="fas fa-eraser"></i> 重置数据</button>
+        </form>
+    </div>
+</div>
+{% endif %}
+
+<!-- 上传恢复 -->
+<div class="modal fade" id="uploadModal" tabindex="-1">
+    <div class="modal-dialog">
+        <form class="modal-content" method="post" action="/data/upload" enctype="multipart/form-data">
+            <div class="modal-header"><h6 class="modal-title"><i class="fas fa-upload"></i> 从备份恢复数据</h6><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+            <div class="modal-body">
+                <div class="mb-2"><label class="form-label">备份文件（.db）</label>
+                    <input type="file" name="file" class="form-control form-control-sm" accept=".db" required>
+                </div>
+                <div class="alert alert-warning p-2 mb-0" style="font-size:12px;border-radius:8px">
+                    恢复将<strong>覆盖当前全部数据</strong>；恢复前系统会自动备份当前数据。
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-sm btn-secondary" data-bs-dismiss="modal">取消</button>
+                <button type="submit" class="btn btn-sm btn-danger" onclick="return confirm('确定用上传的备份覆盖当前数据？')">恢复</button>
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}

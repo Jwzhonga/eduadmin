@@ -1,0 +1,72 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <h5 class="page-title mb-0"><i class="fas fa-umbrella-beach" style="color:#007aff;margin-right:8px"></i> 停课日管理（节假日/学校活动）</h5>
+    {% if current_user and current_user.role == 'admin' %}
+    <button class="btn btn-primary btn-sm" data-bs-toggle="modal" data-bs-target="#addModal"><i class="fas fa-plus"></i> 添加停课日</button>
+    {% endif %}
+</div>
+
+{% if current_semester %}
+<div class="alert alert-light border" style="border-radius:12px;font-size:13px;color:#515154">
+    <i class="fas fa-calendar-week" style="color:#007aff"></i>
+    当前学期有效教学周数：<strong>{{ current_semester.effective_weeks() }}</strong> 周
+    （{{ current_semester.start_date.strftime('%Y-%m-%d') }} ~ {{ current_semester.end_date.strftime('%Y-%m-%d') }}，
+    已扣除周末及以下 {{ rows|length }} 个停课日{% if current_semester.teaching_weeks %}；学期中手动指定为 {{ current_semester.teaching_weeks }} 周{% endif %}）
+</div>
+{% endif %}
+
+<div class="card">
+    <div class="table-responsive">
+        <table class="table table-hover table-sm table-sortable" id="holidaysTable">
+            <thead>
+                <tr>
+                    <th style="width:60px">#</th>
+                    <th>日期</th>
+                    <th>星期</th>
+                    <th>名称</th>
+                    <th>备注</th>
+                    {% if current_user and current_user.role == 'admin' %}<th style="width:80px" data-no-sort>操作</th>{% endif %}
+                </tr>
+            </thead>
+            <tbody>
+                {% for r in rows %}
+                <tr>
+                    <td>{{ loop.index }}</td>
+                    <td>{{ r.holiday_date.strftime('%Y-%m-%d') }}</td>
+                    <td>{{ ['周一','周二','周三','周四','周五','周六','周日'][r.holiday_date.weekday()] }}</td>
+                    <td>{{ r.name }}</td>
+                    <td>{{ r.remark }}</td>
+                    {% if current_user and current_user.role == 'admin' %}
+                    <td>
+                        <button class="btn btn-sm btn-outline-danger" onclick="postDelete('/holidays/{{ r.id }}/delete','确定删除该停课日？')"><i class="fas fa-trash"></i></button>
+                    </td>
+                    {% endif %}
+                </tr>
+                {% else %}
+                <tr><td colspan="6" class="text-center text-muted py-4">暂无停课日记录（法定节假日、运动会、全校活动等）</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+{% if current_user and current_user.role == 'admin' %}
+<div class="modal fade" id="addModal" tabindex="-1">
+    <div class="modal-dialog modal-sm">
+        <form class="modal-content" method="post" action="/holidays/add">
+            <div class="modal-header"><h6 class="modal-title">添加停课日</h6><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+            <div class="modal-body">
+                <div class="mb-2"><label class="form-label">日期</label><input type="date" class="form-control form-control-sm" name="holiday_date" required></div>
+                <div class="mb-2"><label class="form-label">名称</label><input class="form-control form-control-sm" name="name" placeholder="如：国庆节放假" value="放假"></div>
+                <div class="mb-2"><label class="form-label">备注</label><input class="form-control form-control-sm" name="remark"></div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-sm btn-secondary" data-bs-dismiss="modal">取消</button>
+                <button type="submit" class="btn btn-sm btn-primary">保存</button>
+            </div>
+        </form>
+    </div>
+</div>
+{% endif %}
+{% endblock %}

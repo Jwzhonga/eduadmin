@@ -1,0 +1,89 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <h5 class="page-title mb-0"><i class="fas fa-book" style="color:#007aff;margin-right:8px"></i> 教材库</h5>
+    {% if current_user and current_user.role == 'admin' %}
+    <button class="btn btn-primary btn-sm" data-bs-toggle="modal" data-bs-target="#addModal"><i class="fas fa-plus"></i> 添加教材</button>
+    {% endif %}
+</div>
+<div class="card">
+    <div class="table-responsive">
+        <table class="table table-hover table-sm table-sortable" id="textbooksTable">
+            <thead>
+                <tr>
+                    <th style="width:60px">#</th>
+                    <th>教材名称</th><th>ISBN</th><th>出版社</th><th>单价</th><th>适用课程</th><th>库存</th><th>备注</th>
+                    {% if current_user and current_user.role == 'admin' %}<th style="width:120px" data-no-sort>操作</th>{% endif %}
+                </tr>
+            </thead>
+            <tbody>
+                {% for r in rows %}
+                <tr>
+                    <td>{{ loop.index }}</td>
+                    <td>{{ r.name }}</td><td>{{ r.isbn }}</td><td>{{ r.publisher }}</td><td>{{ r.price }}</td><td>{% if r.course_id %}{{ course_name(r.course_id) }}{% endif %}</td><td>{{ r.stock }}</td><td>{{ r.remark }}</td>
+                    {% if current_user and current_user.role == 'admin' %}
+                    <td>
+                        <a class="btn btn-sm btn-outline-primary" href="/textbooks/{{ r.id }}/stock"><i class="fas fa-boxes"></i></a>
+                        <button class="btn btn-sm btn-outline-primary" data-bs-toggle="modal" data-bs-target="#editModal{{ r.id }}"><i class="fas fa-edit"></i></button>
+                        <button class="btn btn-sm btn-outline-danger" onclick="postDelete('/textbooks/{{ r.id }}/delete', {{ r.name|tojson|forceescape }})"><i class="fas fa-trash"></i></button>
+                    </td>
+                    {% endif %}
+                </tr>
+                {% else %}
+                <tr><td colspan="10" class="text-center text-muted py-4">暂无教材</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+{% if current_user and current_user.role == 'admin' %}
+<div class="modal fade" id="addModal" tabindex="-1">
+    <div class="modal-dialog modal-sm">
+        <form class="modal-content" method="post" action="/textbooks/add">
+            <div class="modal-header"><h6 class="modal-title">添加教材</h6><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+            <div class="modal-body">
+<div class="mb-2"><label class="form-label">教材名称</label><input class="form-control form-control-sm" name="name" required></div>
+<div class="mb-2"><label class="form-label">ISBN</label><input class="form-control form-control-sm" name="isbn"></div>
+<div class="mb-2"><label class="form-label">出版社</label><input class="form-control form-control-sm" name="publisher"></div>
+<div class="mb-2"><label class="form-label">单价</label><input type="number" step="0.01" class="form-control form-control-sm" name="price" value="0"></div>
+<div class="mb-2"><label class="form-label">适用课程</label><select class="form-select form-select-sm" name="course_id"><option value="">（不限）</option>{% for c in courses %}<option value="{{ c.id }}">{{ c.name }}</option>{% endfor %}</select></div>
+<div class="mb-2"><label class="form-label">库存</label><input type="number" class="form-control form-control-sm" name="stock" value="0"></div>
+<div class="mb-2"><label class="form-label">备注</label><input type="text" class="form-control form-control-sm" name="remark"></div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-sm btn-secondary" data-bs-dismiss="modal">取消</button>
+                <button type="submit" class="btn btn-sm btn-primary">保存</button>
+            </div>
+        </form>
+    </div>
+</div>
+{% endif %}
+
+<div class="mb-4">
+{% if current_user and current_user.role == 'admin' %}
+{% for r in rows %}
+<div class="modal fade" id="editModal{{ r.id }}" tabindex="-1">
+    <div class="modal-dialog modal-sm">
+        <form class="modal-content" method="post" action="/textbooks/{{ r.id }}/edit">
+            <div class="modal-header"><h6 class="modal-title">编辑教材</h6><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+            <div class="modal-body">
+<div class="mb-2"><label class="form-label">教材名称</label><input type="text" class="form-control form-control-sm" name="name" value="{{ r.name }}"></div>
+<div class="mb-2"><label class="form-label">ISBN</label><input type="text" class="form-control form-control-sm" name="isbn" value="{{ r.isbn }}"></div>
+<div class="mb-2"><label class="form-label">出版社</label><input type="text" class="form-control form-control-sm" name="publisher" value="{{ r.publisher }}"></div>
+<div class="mb-2"><label class="form-label">单价</label><input type="number" class="form-control form-control-sm" name="price" value="{{ r.price }}"></div>
+<div class="mb-2"><label class="form-label">适用课程</label><select class="form-select form-select-sm" name="course_id"><option value="">（不限）</option>{% for c in courses %}<option value="{{ c.id }}"{% if r.course_id == c.id %} selected{% endif %}>{{ c.name }}</option>{% endfor %}</select></div>
+<div class="mb-2"><label class="form-label">库存</label><input type="number" class="form-control form-control-sm" name="stock" value="{{ r.stock }}"></div>
+<div class="mb-2"><label class="form-label">备注</label><input type="text" class="form-control form-control-sm" name="remark" value="{{ r.remark }}"></div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-sm btn-secondary" data-bs-dismiss="modal">取消</button>
+                <button type="submit" class="btn btn-sm btn-primary">保存</button>
+            </div>
+        </form>
+    </div>
+</div>
+{% endfor %}
+{% endif %}
+    </div>
+{% endblock %}

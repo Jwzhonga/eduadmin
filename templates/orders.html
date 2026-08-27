@@ -1,0 +1,133 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+    <h5 class="page-title mb-0"><i class="fas fa-clipboard-list" style="color:#007aff;margin-right:8px"></i> 订书发书</h5>
+    <div class="d-flex gap-2 align-items-center flex-wrap">
+        <form method="get" action="/orders" class="d-flex gap-1 align-items-center">
+            <select name="major" class="form-select form-select-sm" style="width:130px" onchange="this.form.submit()">
+                <option value="">全部专业</option>
+                {% for m in majors %}<option value="{{ m }}" {% if major == m %}selected{% endif %}>{{ m }}</option>{% endfor %}
+            </select>
+            <select name="semester_no" class="form-select form-select-sm" style="width:120px" onchange="this.form.submit()">
+                <option value="">全部学期</option>
+                {% for i in range(1, 7) %}<option value="{{ i }}" {% if s_no == i|string %}selected{% endif %}>第{{ i }}学期</option>{% endfor %}
+            </select>
+            {% if major or s_no %}<a href="/orders" class="btn btn-sm btn-outline-secondary">清除</a>{% endif %}
+        </form>
+        <a href="/orders/export?major={{ major }}&semester_no={{ s_no }}" class="btn btn-sm btn-success"><i class="fas fa-file-excel"></i> {% if major %}导出「{{ major }}」{% else %}全部导出{% endif %}</a>
+        {% if current_user and current_user.role == 'admin' %}
+        <button class="btn btn-primary btn-sm" data-bs-toggle="modal" data-bs-target="#addModal"><i class="fas fa-plus"></i> 新建征订</button>
+        {% endif %}
+    </div>
+</div>
+<div class="card">
+    <div class="table-responsive">
+        <table class="table table-hover table-sm table-sortable" id="ordersTable">
+            <thead>
+                <tr>
+                    <th style="width:60px">#</th>
+                    <th>教材</th>
+                    <th>专业</th>
+                    <th>学期</th>
+                    <th>适用课程</th>
+                    <th>征订范围</th>
+                    <th>数量</th>
+                    <th>单价(元)</th>
+                    <th>金额(元)</th>
+                    <th>状态</th>
+                    <th>备注</th>
+                    {% if current_user and current_user.role == 'admin' %}<th style="width:150px" data-no-sort>操作</th>{% endif %}
+                </tr>
+            </thead>
+            <tbody>
+                {% for r in rows %}
+                {% set tb = textbooks | selectattr('id', 'equalto', r.textbook_id) | first %}
+                {% set cs = courses | selectattr('id', 'equalto', r.course_id) | first %}
+                {% set cl = classes | selectattr('id', 'equalto', r.class_id) | first %}
+                <tr>
+                    <td>{{ loop.index }}</td>
+                    <td>{{ tb.name if tb else '#' ~ r.textbook_id }}</td>
+                    <td>{% if r.major %}<span class="badge text-bg-light border">{{ r.major }}</span>{% else %}—{% endif %}</td>
+                    <td>{{ r.semester_no or 1 }}</td>
+                    <td>{{ cs.name if cs else '—' }}</td>
+                    <td>{{ cl.name if cl else '全校/按课程' }}</td>
+                    <td>{{ r.quantity }}</td>
+                    <td>{{ '%.2f'|format(r.unit_price) }}</td>
+                    <td>{{ '%.2f'|format(r.quantity * r.unit_price) }}</td>
+                    <td>
+                        {% if r.status == 'draft' %}<span class="badge text-bg-warning">草稿</span>
+                        {% elif r.status == 'approved' %}<span class="badge text-bg-primary">已审核</span>
+                        {% else %}<span class="badge text-bg-success">已到货</span>{% endif %}
+                    </td>
+                    <td>{{ r.remark }}</td>
+                    {% if current_user and current_user.role == 'admin' %}
+                    <td>
+                        {% if r.status == 'draft' %}
+                        <form method="post" action="/orders/{{ r.id }}/status" class="d-inline">
+                            <input type="hidden" name="status" value="approved">
+                            <button class="btn btn-sm btn-outline-primary" title="审核通过">审核</button>
+                        </form>
+                        {% elif r.status == 'approved' %}
+                        <form method="post" action="/orders/{{ r.id }}/status" class="d-inline">
+                            <input type="hidden" name="status" value="arrived">
+                            <button class="btn btn-sm btn-outline-success" title="标记到货">到货</button>
+                        </form>
+                        {% endif %}
+                        <button class="btn btn-sm btn-outline-danger" onclick="postDelete('/orders/{{ r.id }}/delete','确定删除该征订计划？')"><i class="fas fa-trash"></i></button>
+                    </td>
+                    {% endif %}
+                </tr>
+                {% else %}
+                <tr><td colspan="12" class="text-center text-muted py-4">暂无征订计划，点击右上角「新建征订」开始</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+{% if current_user and current_user.role == 'admin' %}
+<div class="modal fade" id="addModal" tabindex="-1">
+    <div class="modal-dialog modal-sm">
+        <form class="modal-content" method="post" action="/orders/add">
+            <div class="modal-header"><h6 class="modal-title">新建征订计划</h6><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+            <div class="modal-body">
+                <div class="mb-2"><label class="form-label">专业（按专业统一规划）</label>
+                    <input class="form-control form-control-sm" name="major" list="majorList" placeholder="如：供电 / 机电 / 汽修" value="{{ major }}">
+                    <datalist id="majorList">{% for m in majors %}<option value="{{ m }}">{% endfor %}</datalist>
+                </div>
+                <div class="mb-2"><label class="form-label">学期（1-6）</label>
+                    <select class="form-select form-select-sm" name="semester_no">
+                        {% for i in range(1, 7) %}<option value="{{ i }}" {% if s_no == i|string %}selected{% endif %}>第{{ i }}学期</option>{% endfor %}
+                    </select>
+                </div>
+                <div class="mb-2"><label class="form-label">教材</label>
+                    <select class="form-select form-select-sm" name="textbook_id" required>
+                        <option value="">— 请选择 —</option>
+                        {% for t in textbooks %}<option value="{{ t.id }}">{{ t.name }}（{{ '%.2f'|format(t.price) }}元）</option>{% endfor %}
+                    </select>
+                </div>
+                <div class="mb-2"><label class="form-label">适用课程</label>
+                    <select class="form-select form-select-sm" name="course_id">
+                        <option value="">— 不指定 —</option>
+                        {% for c in courses %}<option value="{{ c.id }}">{{ c.name }}</option>{% endfor %}
+                    </select>
+                </div>
+                <div class="mb-2"><label class="form-label">征订范围</label>
+                    <select class="form-select form-select-sm" name="class_id">
+                        <option value="">全校/按课程</option>
+                        {% for c in classes %}<option value="{{ c.id }}">{{ c.name }}</option>{% endfor %}
+                    </select>
+                </div>
+                <div class="mb-2"><label class="form-label">数量</label><input type="number" class="form-control form-control-sm" name="quantity" value="0" required></div>
+                <div class="mb-2"><label class="form-label">单价(元，留空取教材库价)</label><input type="number" step="0.01" class="form-control form-control-sm" name="unit_price" placeholder="0"></div>
+                <div class="mb-2"><label class="form-label">备注</label><input class="form-control form-control-sm" name="remark"></div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-sm btn-secondary" data-bs-dismiss="modal">取消</button>
+                <button type="submit" class="btn btn-sm btn-primary">保存</button>
+            </div>
+        </form>
+    </div>
+</div>
+{% endif %}
+{% endblock %}

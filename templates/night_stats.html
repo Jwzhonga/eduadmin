@@ -1,0 +1,168 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-2 flex-wrap gap-2">
+    <h5 class="page-title mb-0" style="font-size:17px"><i class="fas fa-chart-bar" style="color:#007aff;margin-right:8px"></i> 夜自习统计</h5>
+    <div class="d-flex gap-2 align-items-center">
+        <div class="btn-group btn-group-sm">
+            <a class="btn btn-outline-secondary" href="/night/stats?start={{ prev_start.strftime('%Y-%m-%d') }}"><i class="fas fa-chevron-left"></i></a>
+            <span class="btn btn-outline-secondary" style="min-width:150px;padding:2px 8px">{{ start.strftime('%m-%d') }}~{{ days[-1].strftime('%m-%d') }}{% if week_no %} 第{{ week_no }}周{% endif %}</span>
+            <a class="btn btn-outline-secondary" href="/night/stats?start={{ next_start.strftime('%Y-%m-%d') }}"><i class="fas fa-chevron-right"></i></a>
+            <a class="btn btn-outline-secondary" href="/night/stats?start=today"><i class="fas fa-calendar-day"></i> 本周</a>
+        </div>
+        <a href="/night?start={{ start.strftime('%Y-%m-%d') }}" class="btn btn-sm btn-outline-secondary">排班</a>
+        <a href="/night/stats/export?period={{ cur_period }}" class="btn btn-sm btn-success"><i class="fas fa-file-excel"></i> 导出</a>
+    </div>
+</div>
+
+<div class="alert alert-light border p-2 mb-2" style="border-radius:10px;font-size:12px;color:#515154">
+    <i class="fas fa-info-circle" style="color:#007aff"></i>
+    按周显示排班，格子<strong>改完即自动保存</strong>；点格旁状态徽章切换（⏳待确认→✅确认→❌缺勤）；某天不上自习点列头 <span class="badge text-bg-danger">×</span>。
+    下方为本周统计与每 4 周周期补助（{{ unit }} 元/节）。
+</div>
+
+<div class="card mb-3">
+    <div class="table-responsive">
+        <table class="table table-hover table-sm" style="font-size:13px">
+            <thead>
+                <tr>
+                    <th style="width:56px;padding:4px 6px">教室</th>
+                    <th style="padding:4px 6px">班级</th>
+                    {% for d in days %}
+                    <th class="text-center" style="padding:4px 2px">
+                        周{{ ['日','一','二','三','四'][loop.index0] }}<br>
+                        <span style="font-weight:400;font-size:10px;color:#86868b">{{ d.strftime('%m-%d') }}</span><br>
+                        {% if current_user and current_user.role == 'admin' %}
+                        <button class="btn btn-sm btn-outline-danger day-clear" style="padding:0 5px;font-size:10px;line-height:1.4"
+                                data-date="{{ d }}" title="本日不上自习（清空整列）" onclick="clearDay(this)">×</button>
+                        {% endif %}
+                    </th>
+                    {% endfor %}
+                </tr>
+            </thead>
+            <tbody>
+                {% for cid in class_ids %}
+                <tr>
+                    <td style="padding:3px 6px;font-size:12px">{{ room_name(class_room_id(cid)) }}</td>
+                    <td style="padding:3px 6px">{{ class_name(cid) }}</td>
+                    {% for d in days %}
+                    {% set rec = grid.get(cid, {}).get(d) %}
+                    <td class="text-center" style="padding:3px 2px">
+                        <div class="d-inline-flex align-items-center gap-1">
+                            <select class="form-select form-select-sm night-sel" style="width:96px;padding:1px 4px;font-size:12px"
+                                    data-date="{{ d }}" data-class="{{ cid }}" data-rid="{{ rec.id if rec else '' }}"
+                                    data-orig="{{ rec.teacher_id if rec else '' }}" onchange="saveCell(this)">
+                                <option value="">—</option>
+                                {% for t in teachers %}<option value="{{ t.id }}" {% if rec and rec.teacher_id == t.id %}selected{% endif %}>{{ t.name }}</option>{% endfor %}
+                            </select>
+                            {% if rec %}
+                            <span class="st-badge" style="cursor:pointer;font-size:10px;white-space:nowrap" title="点击切换状态"
+                                  onclick="toggleStatus({{ rec.id }}, this)"
+                                  data-status="{{ rec.status }}">{% if rec.status == 'confirmed' %}✅{% elif rec.status == 'absent' %}❌{% else %}⏳{% endif %}</span>
+                            {% endif %}
+                        </div>
+                    </td>
+                    {% endfor %}
+                </tr>
+                {% else %}
+                <tr><td colspan="7" class="text-center text-muted py-5">该周暂无排班，去「排班」页导入或直接安排</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<div class="row g-3">
+    <div class="col-lg-5">
+        <div class="card h-100">
+            <div class="card-header" style="padding:8px 14px;font-size:14px"><i class="fas fa-user-clock"></i> 本周统计（{{ week_stat|length }} 位教师）</div>
+            <div class="table-responsive">
+                <table class="table table-sm table-hover" style="font-size:13px">
+                    <thead><tr><th>教师</th><th class="text-center">节数</th><th class="text-center">金额(元)</th></tr></thead>
+                    <tbody>
+                        {% for name, cnt in week_stat %}
+                        <tr><td>{{ name }}</td><td class="text-center"><strong>{{ cnt }}</strong></td><td class="text-center">{{ '%.2f'|format(cnt * unit) }}</td></tr>
+                        {% else %}
+                        <tr><td colspan="3" class="text-center text-muted py-4">本周无统计</td></tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+    <div class="col-lg-7">
+        <div class="card h-100">
+            <div class="card-header" style="padding:8px 14px;font-size:14px"><i class="fas fa-coins"></i> 每 4 周周期补助（{{ unit }} 元/节）</div>
+            <div class="card-body p-2">
+                <div class="row g-2">
+                    {% for pno, arr in periods_info %}
+                    <div class="col-md-6">
+                        <div class="border rounded p-2" style="height:100%">
+                            <div style="font-weight:600;font-size:12px;margin-bottom:4px">第 {{ pno }} 周期（第{{ (pno-1)*4+1 }}-{{ pno*4 }}周）</div>
+                            <table class="table table-sm table-borderless" style="font-size:12px;margin:0">
+                                {% for x in arr[:8] %}
+                                <tr><td>{{ x.name }}</td><td class="text-end">{{ x.count }}节</td><td class="text-end" style="color:#34c759">{{ x.amount }}元</td></tr>
+                                {% endfor %}
+                                {% if arr|length > 8 %}<tr><td colspan="3" class="text-muted">…共 {{ arr|length }} 位教师</td></tr>{% endif %}
+                            </table>
+                        </div>
+                    </div>
+                    {% else %}
+                    <div class="text-muted py-3" style="font-size:13px">暂无补助数据</div>
+                    {% endfor %}
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+function saveCell(sel) {
+    var tid = sel.value, orig = sel.dataset.orig || '', rid = sel.dataset.rid;
+    if (tid === orig) return;
+    sel.disabled = true;
+    var url = '', body = '';
+    if (tid) {
+        if (rid) { url = '/night/' + rid + '/edit'; body = 'teacher_id=' + tid; }
+        else { url = '/night/add'; body = 'shift_date=' + sel.dataset.date + '&class_id=' + sel.dataset.class + '&teacher_id=' + tid; }
+    } else {
+        if (rid) { url = '/night/' + rid + '/delete'; body = ''; }
+        else { sel.disabled = false; return; }
+    }
+    fetch(url, {method:'POST',
+        headers:{'Content-Type':'application/x-www-form-urlencoded','X-CSRF-Token':cmCsrfToken(),'X-Requested-With':'XMLHttpRequest'},
+        body: body})
+        .then(function(r){return r.json();})
+        .then(function(j){
+            sel.disabled = false;
+            if (j.ok) {
+                sel.dataset.orig = tid;
+                sel.dataset.rid = j.id || rid || '';
+                sel.style.borderColor = '#34c759';
+                setTimeout(function(){sel.style.borderColor='';}, 1200);
+                location.reload();
+            } else { alert(j.error || '保存失败'); }
+        })
+        .catch(function(){sel.disabled = false; alert('网络错误');});
+}
+function clearDay(btn) {
+    var d = btn.dataset.date;
+    if (!confirm('确定 ' + d + ' 整日不上自习？将清空该日全部排班。')) return;
+    fetch('/night/day_clear', {method:'POST',
+        headers:{'Content-Type':'application/x-www-form-urlencoded','X-CSRF-Token':cmCsrfToken(),'X-Requested-With':'XMLHttpRequest'},
+        body: 'date=' + d})
+        .then(function(r){return r.json();})
+        .then(function(j){ if (j.ok) location.reload(); else alert(j.error||'失败'); })
+        .catch(function(){alert('网络错误');});
+}
+function toggleStatus(rid, el) {
+    var map = {'scheduled':'confirmed', 'confirmed':'absent', 'absent':'scheduled'};
+    var next = map[el.dataset.status] || 'confirmed';
+    fetch('/night/' + rid + '/edit', {method:'POST',
+        headers:{'Content-Type':'application/x-www-form-urlencoded','X-CSRF-Token':cmCsrfToken(),'X-Requested-With':'XMLHttpRequest'},
+        body: 'status=' + next})
+        .then(function(r){return r.json();})
+        .then(function(j){ if (j.ok) location.reload(); else alert(j.error||'失败'); })
+        .catch(function(){alert('网络错误');});
+}
+</script>
+{% endblock %}

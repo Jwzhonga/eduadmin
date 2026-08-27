@@ -1,0 +1,1323 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>教务管理系统</title>
+    <link rel="icon" href="/static/favicon.png">
+    <link href="/static/bootstrap.min.css?v=2" rel="stylesheet">
+    <link href="/static/fontawesome.min.css?v=2" rel="stylesheet">
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+    <meta http-equiv="Pragma" content="no-cache">
+    <meta http-equiv="Expires" content="0">
+    <meta name="csrf-token" content="{{ csrf_token() }}">
+    <style>
+        /* ══════════════════════════════════════════
+           Apple Design System — 教务管理系统
+           ══════════════════════════════════════════ */
+
+        /* ── Apple Font Smoothing ── */
+        * { -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; }
+
+        /* ── Bootstrap 主题色覆盖 → Apple HIG 色彩系统 ── */
+        :root {
+            --bs-primary: #007aff;
+            --bs-primary-rgb: 0, 122, 255;
+            --bs-success: #34c759;
+            --bs-success-rgb: 52, 199, 89;
+            --bs-danger: #ff3b30;
+            --bs-danger-rgb: 255, 59, 48;
+            --bs-warning: #ff9500;
+            --bs-warning-rgb: 255, 149, 0;
+            --bs-info: #5ac8fa;
+            --bs-info-rgb: 90, 200, 250;
+            --bs-secondary: #6e6e73;
+            --bs-secondary-rgb: 110, 110, 115;
+            --bs-light: #f5f5f7;
+            --bs-light-rgb: 245, 245, 247;
+            --bs-dark: #1d1d1f;
+            --bs-dark-rgb: 29, 29, 31;
+            --bs-body-color: #1d1d1f;
+            --bs-body-bg: #f5f5f7;
+            --bs-border-color: rgba(0,0,0,0.06);
+            --bs-link-color: #007aff;
+            --bs-link-hover-color: #0066d6;
+        }
+
+        /* ── 全局 ── */
+        body {
+            background: #f5f5f7;
+            color: #1d1d1f;
+            font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", "Helvetica Neue", Arial, sans-serif;
+            letter-spacing: 0.01em;
+        }
+
+        .stat-card {
+            background: #ffffff;
+            border: none;
+            border-radius: 14px;
+            padding: 24px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.04), 0 1px 1px rgba(0,0,0,0.02);
+            transition: transform 0.25s cubic-bezier(0.25,0.1,0.25,1), box-shadow 0.25s ease;
+        }
+        .stat-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 16px rgba(0,0,0,0.06), 0 2px 4px rgba(0,0,0,0.03);
+        }
+        .stat-card .number { font-size: 32px; font-weight: 700; letter-spacing: -0.02em; }
+        .stat-card .label { color: #6e6e73; font-size: 13px; font-weight: 500; }
+
+        .page-title {
+            font-size: 20px; font-weight: 700; margin-bottom: 24px; color: #1d1d1f;
+            letter-spacing: -0.01em;
+            position: sticky; top: 0; z-index: 10;
+            background: rgba(245,245,247,0.85);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            padding: 16px 0 12px; margin: 0 0 16px 0;
+        }
+
+        .card {
+            background: #ffffff;
+            border: none;
+            border-radius: 14px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.04), 0 1px 1px rgba(0,0,0,0.02);
+            transition: box-shadow 0.25s ease;
+        }
+        .card:hover { box-shadow: 0 4px 16px rgba(0,0,0,0.06), 0 2px 4px rgba(0,0,0,0.03); }
+        .card-header {
+            background: transparent;
+            border-bottom: 1px solid rgba(0,0,0,0.05);
+            font-weight: 600;
+            color: #1d1d1f;
+            padding: 16px 20px;
+            font-size: 14px;
+            letter-spacing: -0.01em;
+        }
+        .card-body { padding: 20px; }
+        .card.border-0.shadow-sm { box-shadow: 0 1px 3px rgba(0,0,0,0.04), 0 1px 1px rgba(0,0,0,0.02) !important; border-radius: 14px !important; }
+        .card.border-0.shadow-sm .card-header { border-radius: 14px 14px 0 0; }
+
+        .table th {
+            background: transparent;
+            color: #6e6e73;
+            font-weight: 600;
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            border-bottom: 1px solid rgba(0,0,0,0.06);
+            padding: 14px 16px !important;
+        }
+        .table td {
+            color: #1d1d1f;
+            vertical-align: middle;
+            padding: 14px 16px;
+            border-bottom: 1px solid rgba(0,0,0,0.04);
+        }
+        .table-sm td { padding: 6px 8px !important; }
+        .table-sm th { padding: 6px 8px !important; }
+        .table tr:last-child td { border-bottom: none; }
+        .table-light { --bs-table-bg: transparent; --bs-table-color: #6e6e73; }
+
+        /* ── Apple-Style Pagination ── */
+        .pagination { gap: 4px; }
+        .page-link {
+            border: none;
+            border-radius: 6px;
+            padding: 6px 12px;
+            font-size: 13px;
+            color: var(--sd-accent);
+            background: transparent;
+            transition: all 0.2s ease;
+        }
+        .page-link:hover {
+            background: rgba(var(--sd-accent-rgb), 0.08);
+            color: var(--sd-accent);
+        }
+        .page-item.active .page-link {
+            background: var(--sd-accent);
+            color: #fff;
+        }
+        .page-item.disabled .page-link {
+            color: #aeaeb2;
+            background: transparent;
+        }
+
+        /* ── Apple-Style Buttons ── */
+        .btn {
+            border-radius: 8px;
+            font-weight: 500;
+            padding: 8px 18px;
+            font-size: 14px;
+            transition: all 0.2s cubic-bezier(0.25,0.1,0.25,1);
+            letter-spacing: 0.01em;
+        }
+        .btn-primary {
+            background: var(--sd-btn-bg);
+            border-color: var(--sd-btn-bg);
+            color: var(--sd-btn-text);
+        }
+        .btn-primary:hover {
+            background: var(--sd-btn-hover);
+            border-color: var(--sd-btn-hover);
+        }
+        .btn-primary:active {
+            background: var(--sd-btn-active);
+            transform: scale(0.97);
+        }
+        .btn-outline-primary {
+            color: var(--sd-accent);
+            border-color: var(--sd-accent);
+        }
+        .btn-outline-primary:hover {
+            background: var(--sd-accent);
+            color: #fff;
+            border-color: var(--sd-accent);
+        }
+        .btn-outline-secondary {
+            color: #6e6e73;
+            border-color: #d2d2d7;
+        }
+        .btn-outline-secondary:hover {
+            background: #f5f5f7;
+            color: #1d1d1f;
+            border-color: #c7c7cc;
+        }
+        .btn-outline-success { color: #34c759; border-color: #34c759; }
+        .btn-outline-success:hover { background: #34c759; color: #fff; border-color: #34c759; }
+        .btn-outline-info { color: #5ac8fa; border-color: #5ac8fa; }
+        .btn-outline-info:hover { background: #5ac8fa; color: #fff; border-color: #5ac8fa; }
+        .btn-outline-danger { color: #ff3b30; border-color: #ff3b30; }
+        .btn-outline-danger:hover { background: #ff3b30; color: #fff; border-color: #ff3b30; }
+        .btn-sm { padding: 5px 12px; font-size: 12px; border-radius: 6px; }
+        .btn-lg { padding: 12px 24px; font-size: 16px; border-radius: 10px; }
+
+        /* ── Apple-Style Form Controls ── */
+        .form-control, .form-select {
+            border: 1px solid #c7c7cc;
+            border-radius: 8px;
+            padding: 10px 14px;
+            font-size: 14px;
+            color: #1d1d1f;
+            background: #ffffff;
+            transition: border-color 0.2s ease, box-shadow 0.2s ease;
+        }
+        .form-control:focus, .form-select:focus {
+            border-color: var(--sd-accent);
+            box-shadow: 0 0 0 3px rgba(var(--sd-accent-rgb), 0.15);
+            outline: none;
+        }
+        .form-control::placeholder { color: #aeaeb2; }
+        .form-label { font-size: 13px; font-weight: 500; color: #515154; margin-bottom: 4px; }
+
+        .alert {
+            border-radius: 10px;
+            padding: 12px 16px;
+            font-size: 13px;
+            margin-bottom: 12px;
+            border: none;
+        }
+        .alert-danger { background: #fff2f4; color: #c41e3a; }
+        .alert-info { background: #e8f4fd; color: #0066cc; }
+        .alert-success { background: #e8f8ee; color: #1a8c3e; }
+        .alert-warning { background: #fff7e6; color: #b35c00; }
+
+        table img.voucher-thumb { max-width: 80px; max-height: 60px; border-radius: 6px; cursor: pointer; }
+
+        @media print { .sidebar, .no-print, #mobileHeader, .main-content-header, .top-actions { display: none !important; } .main-content-wrap { margin: 0 !important; } .main-content-body { overflow: visible !important; padding: 0 !important; } .card { border: none !important; box-shadow: none !important; } }
+
+        .badge-present { background-color: #34c759 !important; color: #fff !important; border-radius: 5px; }
+        .badge-late { background-color: #ff9500 !important; color: #fff !important; border-radius: 5px; }
+        .badge-sick { background-color: #007aff !important; color: #fff !important; border-radius: 5px; }
+        .badge-personal { background-color: #ff9500 !important; color: #fff !important; border-radius: 5px; }
+        .badge-truant { background-color: #ff3b30 !important; color: #fff !important; border-radius: 5px; }
+        .badge { font-weight: 500; padding: 4px 10px; font-size: 11px; border-radius: 5px; letter-spacing: 0.02em; }
+
+        /* ── Apple-Style Sidebar ── */
+        /* 主题变量体系：body 定义默认（Apple 蓝）完整色系，
+           每个 theme-* class 覆写 accent 色系 + 背景，
+           切换主题时 激活/悬停/图标/logo/主按钮 整体联动 */
+        body {
+            --sd-bg: rgba(245,245,247,0.92);
+            --sd-border: rgba(0,0,0,0.06);
+            --sd-text: #1d1d1f;
+            --sd-nav-text: #515154;
+            --sd-nav-icon: #86868b;
+            --sd-hover-text: #007aff;
+            --sd-hover-bg: rgba(0,122,255,0.08);
+            --sd-active-text: #007aff;
+            --sd-active-bg: rgba(0,122,255,0.12);
+            --sd-active-border: #007aff;
+            --sd-logo-color: #1d1d1f;
+            --sd-logo-icon: #007aff;
+            --sd-footer-border: rgba(0,0,0,0.06);
+            --sd-footer-text: #86868b;
+            --sd-sem-hover: rgba(0,122,255,0.08);
+            --sd-icon-bg: rgba(0,0,0,0.05);
+            --sd-scroll-thumb: rgba(0,0,0,0.15);
+            /* accent 联动色系（激活/悬停/图标/logo/主按钮共用） */
+            --sd-accent: #007aff;
+            --sd-accent-strong: #0066d6;
+            --sd-accent-deep: #0055b3;
+            --sd-accent-rgb: 0,122,255;
+            --sd-btn-bg: #007aff;
+            --sd-btn-hover: #0066d6;
+            --sd-btn-active: #0055b3;
+            --sd-btn-text: #ffffff;
+        }
+        /* 浅色主题：天蓝 / 薄荷 / 暖米 / 淡紫 / 静谧灰 */
+        .theme-skyblue {
+            --sd-bg: rgba(227,242,253,0.92); --sd-border: rgba(172,214,245,0.55);
+            --sd-hover-text:#0891b2; --sd-hover-bg:rgba(8,145,178,0.10);
+            --sd-active-text:#0891b2; --sd-active-bg:rgba(8,145,178,0.16); --sd-active-border:#0891b2;
+            --sd-logo-icon:#0891b2; --sd-sem-hover:rgba(8,145,178,0.10);
+            --sd-accent:#0891b2; --sd-accent-strong:#0e7490; --sd-accent-deep:#0a5d78; --sd-accent-rgb:8,145,178;
+            --sd-btn-bg:#0891b2; --sd-btn-hover:#0e7490; --sd-btn-active:#0a5d78;
+        }
+        .theme-mint {
+            --sd-bg: rgba(232,245,233,0.92); --sd-border: rgba(180,220,182,0.55);
+            --sd-hover-text:#059669; --sd-hover-bg:rgba(5,150,105,0.10);
+            --sd-active-text:#059669; --sd-active-bg:rgba(5,150,105,0.16); --sd-active-border:#059669;
+            --sd-logo-icon:#059669; --sd-sem-hover:rgba(5,150,105,0.10);
+            --sd-accent:#059669; --sd-accent-strong:#047857; --sd-accent-deep:#065f46; --sd-accent-rgb:5,150,105;
+            --sd-btn-bg:#059669; --sd-btn-hover:#047857; --sd-btn-active:#065f46;
+        }
+        .theme-cream {
+            --sd-bg: rgba(255,248,225,0.92); --sd-border: rgba(245,224,160,0.6);
+            --sd-hover-text:#d97706; --sd-hover-bg:rgba(217,119,6,0.10);
+            --sd-active-text:#d97706; --sd-active-bg:rgba(217,119,6,0.16); --sd-active-border:#d97706;
+            --sd-logo-icon:#d97706; --sd-sem-hover:rgba(217,119,6,0.10);
+            --sd-accent:#d97706; --sd-accent-strong:#b45309; --sd-accent-deep:#92400e; --sd-accent-rgb:217,119,6;
+            --sd-btn-bg:#d97706; --sd-btn-hover:#b45309; --sd-btn-active:#92400e;
+        }
+        .theme-lavender {
+            --sd-bg: rgba(243,229,245,0.92); --sd-border: rgba(214,186,224,0.55);
+            --sd-hover-text:#7c3aed; --sd-hover-bg:rgba(124,58,237,0.10);
+            --sd-active-text:#7c3aed; --sd-active-bg:rgba(124,58,237,0.16); --sd-active-border:#7c3aed;
+            --sd-logo-icon:#7c3aed; --sd-sem-hover:rgba(124,58,237,0.10);
+            --sd-accent:#7c3aed; --sd-accent-strong:#6d28d9; --sd-accent-deep:#5b21b6; --sd-accent-rgb:124,58,237;
+            --sd-btn-bg:#7c3aed; --sd-btn-hover:#6d28d9; --sd-btn-active:#5b21b6;
+        }
+        .theme-gray {
+            --sd-bg: rgba(236,239,241,0.92); --sd-border: rgba(199,208,214,0.6);
+            --sd-hover-text:#546e7a; --sd-hover-bg:rgba(84,110,122,0.10);
+            --sd-active-text:#546e7a; --sd-active-bg:rgba(84,110,122,0.16); --sd-active-border:#546e7a;
+            --sd-logo-icon:#546e7a; --sd-sem-hover:rgba(84,110,122,0.10);
+            --sd-accent:#546e7a; --sd-accent-strong:#455a64; --sd-accent-deep:#37474f; --sd-accent-rgb:84,110,122;
+            --sd-btn-bg:#546e7a; --sd-btn-hover:#455a64; --sd-btn-active:#37474f;
+        }
+        /* 深色主题：石墨黑 / 深海蓝 */
+        .theme-dark {
+            --sd-bg: rgba(28,28,30,0.95); --sd-border: rgba(255,255,255,0.08);
+            --sd-text:#f5f5f7; --sd-nav-text:#b0b0b5; --sd-nav-icon:#8e8e93;
+            --sd-hover-text:#0a84ff; --sd-hover-bg:rgba(10,132,255,0.16);
+            --sd-active-text:#0a84ff; --sd-active-bg:rgba(10,132,255,0.26); --sd-active-border:#0a84ff;
+            --sd-logo-color:#ffffff; --sd-logo-icon:#0a84ff;
+            --sd-footer-border: rgba(255,255,255,0.08); --sd-footer-text:#98989d;
+            --sd-sem-hover:rgba(10,132,255,0.16);
+            --sd-icon-bg: rgba(255,255,255,0.10); --sd-scroll-thumb: rgba(255,255,255,0.18);
+            --sd-accent:#0a84ff; --sd-accent-strong:#409cff; --sd-accent-deep:#0066d6; --sd-accent-rgb:10,132,255;
+            --sd-btn-bg:#0a84ff; --sd-btn-hover:#409cff; --sd-btn-active:#0066d6;
+        }
+        .theme-navy {
+            --sd-bg: rgba(14,27,46,0.96); --sd-border: rgba(120,160,220,0.18);
+            --sd-text:#eaf2fc; --sd-nav-text:#a7c0dd; --sd-nav-icon:#7e9bc0;
+            --sd-hover-text:#5ac8fa; --sd-hover-bg:rgba(90,200,250,0.16);
+            --sd-active-text:#5ac8fa; --sd-active-bg:rgba(90,200,250,0.26); --sd-active-border:#5ac8fa;
+            --sd-logo-color:#ffffff; --sd-logo-icon:#5ac8fa;
+            --sd-footer-border: rgba(120,160,220,0.18); --sd-footer-text:#86a2c4;
+            --sd-sem-hover:rgba(90,200,250,0.16);
+            --sd-icon-bg: rgba(90,200,250,0.14); --sd-scroll-thumb: rgba(255,255,255,0.18);
+            --sd-accent:#5ac8fa; --sd-accent-strong:#7cd6ff; --sd-accent-deep:#2e9ad6; --sd-accent-rgb:90,200,250;
+            --sd-btn-bg:#2e9ad6; --sd-btn-hover:#1f80b8; --sd-btn-active:#186a9a;
+        }
+
+        .sidebar {
+            background: var(--sd-bg);
+            backdrop-filter: blur(40px);
+            -webkit-backdrop-filter: blur(40px);
+            border-right: 1px solid var(--sd-border);
+            position: fixed; top: 0; left: 0;
+            width: 220px; height: 100vh;
+            color: var(--sd-text); z-index: 100;
+            overflow-y: auto;
+            transition: background 0.3s ease, border-color 0.3s ease;
+            scrollbar-width: thin;
+            scrollbar-color: var(--sd-scroll-thumb) transparent;
+        }
+        .sidebar::-webkit-scrollbar { width: 6px; }
+        .sidebar::-webkit-scrollbar-track { background: transparent; }
+        .sidebar::-webkit-scrollbar-thumb { background: var(--sd-scroll-thumb); border-radius: 3px; }
+        .sidebar::-webkit-scrollbar-thumb:hover { background: var(--sd-accent); }
+
+        /* ── Logo 区：图标做 accent 渐变圆底瓷块 ── */
+        .sidebar .logo {
+            display: flex; align-items: center;
+            padding: 22px 20px 18px;
+            font-size: 17px; font-weight: 700;
+            letter-spacing: -0.02em;
+            color: var(--sd-logo-color);
+            border-bottom: 1px solid var(--sd-border);
+            transition: color 0.3s ease;
+        }
+        .sidebar .logo i {
+            color: var(--sd-btn-text);
+            background: linear-gradient(135deg, var(--sd-accent), var(--sd-accent-strong));
+            width: 36px; height: 36px; line-height: 36px;
+            text-align: center; border-radius: 10px;
+            font-size: 18px; margin-right: 10px;
+            box-shadow: 0 2px 8px rgba(var(--sd-accent-rgb), 0.35);
+            flex-shrink: 0;
+            transition: background 0.3s ease;
+        }
+
+        /* ── 导航项：圆角胶囊 + 左侧指示条 + 图标圆底容器 ── */
+        .sidebar .nav-link {
+            position: relative;
+            color: var(--sd-nav-text);
+            margin: 2px 10px;
+            padding: 8px 12px;
+            font-size: 13px;
+            font-weight: 500;
+            border-radius: 10px;
+            border-left: none;
+            transition: color 0.2s ease, background-color 0.2s ease;
+        }
+        .sidebar .nav-link::before {
+            content: "";
+            position: absolute; left: -1px; top: 50%;
+            width: 3px; height: 18px; border-radius: 3px;
+            background: var(--sd-accent);
+            transform: translateY(-50%) scaleY(0);
+            transition: transform 0.2s ease;
+        }
+        .sidebar .nav-link:hover {
+            color: var(--sd-hover-text);
+            background: var(--sd-hover-bg);
+        }
+        .sidebar .nav-link:hover::before { transform: translateY(-50%) scaleY(1); }
+        .sidebar .nav-link.active {
+            color: var(--sd-active-text);
+            background: var(--sd-active-bg);
+            font-weight: 600;
+        }
+        .sidebar .nav-link.active::before { transform: translateY(-50%) scaleY(1); }
+        /* 图标统一圆底容器 */
+        .sidebar .nav-link > i:first-child {
+            width: 28px; height: 28px; line-height: 28px;
+            border-radius: 8px; text-align: center;
+            margin-right: 10px; font-size: 13px;
+            color: var(--sd-nav-icon);
+            background: var(--sd-icon-bg);
+            transition: color 0.2s ease, background-color 0.2s ease;
+            flex-shrink: 0;
+        }
+        .sidebar .nav-link:hover > i:first-child { color: var(--sd-hover-text); background: var(--sd-hover-bg); }
+        .sidebar .nav-link.active > i:first-child { color: var(--sd-active-text); background: var(--sd-active-bg); }
+
+        /* 子菜单：取消图标圆底，弱化缩进 */
+        .sidebar .sub-nav .nav-link {
+            padding: 6px 12px 6px 40px;
+            font-size: 12px;
+            border-radius: 8px;
+            margin: 1px 10px;
+        }
+        .sidebar .sub-nav .nav-link::before { content: none; }
+        .sidebar .sub-nav .nav-link > i:first-child {
+            width: 20px; height: auto; line-height: inherit;
+            background: transparent; font-size: 11px; margin-right: 8px;
+        }
+        .sidebar .sub-nav .nav-link:hover > i:first-child,
+        .sidebar .sub-nav .nav-link.active > i:first-child { background: transparent; }
+        .sidebar .sub-nav .nav-link:hover,
+        .sidebar .sub-nav .nav-link.active {
+            background: var(--sd-hover-bg);
+            color: var(--sd-hover-text);
+        }
+        /* 学期切换开关：不套图标圆底 / 无指示条 */
+        .sidebar .sem-section .nav-link { margin: 0; }
+        .sidebar .sem-section .nav-link::before { content: none; }
+        .sidebar .sem-section .nav-link:hover,
+        .sidebar .sem-section .nav-link.active { background: transparent; }
+        .sidebar .sem-section .nav-link > i:first-child {
+            width: auto; height: auto; line-height: inherit;
+            background: transparent; border-radius: 0;
+            margin-right: 8px; font-size: 12px;
+        }
+        .sidebar hr { border-color: var(--sd-border); margin: 10px 20px; opacity: 0.6; }
+
+        /* 学期管理区域 */
+        .sidebar .sem-section a { color: var(--sd-nav-text); }
+        .sidebar .sem-section a:hover { color: var(--sd-hover-text); }
+        .sidebar .sem-btn {
+            font-size: 12px;
+            background: transparent;
+            color: var(--sd-nav-text);
+            border: none;
+            border-radius: 8px;
+            padding: 5px 10px;
+            text-align: left;
+            width: 100%;
+            transition: all 0.2s ease;
+        }
+        .sidebar .sem-btn:hover,
+        .sidebar .sem-btn.active {
+            background: var(--sd-sem-hover);
+            color: var(--sd-hover-text);
+        }
+        .sidebar .sem-btn.active { color: var(--sd-active-text); font-weight: 600; }
+        .sidebar .sidebar-footer {
+            border-top: 1px solid var(--sd-footer-border);
+            padding: 14px 20px 16px;
+        }
+        .sidebar .sidebar-footer .text-muted { color: var(--sd-footer-text) !important; font-size: 11px; }
+        .sidebar .sidebar-footer .logout-link {
+            color: var(--sd-footer-text);
+            font-size: 12px;
+            text-decoration: none;
+            transition: color 0.2s ease;
+        }
+        .sidebar .sidebar-footer .logout-link:hover {
+            color: #ff3b30;
+        }
+        /* ── 主题选择器 ── */
+        .theme-picker {
+            padding: 12px 16px 14px;
+            border-top: 1px solid var(--sd-border);
+        }
+        .theme-picker .picker-label {
+            font-size: 11px;
+            color: var(--sd-footer-text);
+            margin-bottom: 8px;
+        }
+        .theme-picker .theme-dot {
+            display: inline-block;
+            width: 22px; height: 22px;
+            border-radius: 50%;
+            cursor: pointer;
+            border: 2px solid var(--sd-border);
+            box-shadow: inset 0 0 0 1px rgba(0,0,0,0.04);
+            transition: all 0.2s ease;
+            margin-right: 7px;
+            vertical-align: middle;
+        }
+        .theme-picker .theme-dot:hover {
+            transform: scale(1.18);
+        }
+        .theme-picker .theme-dot.active {
+            border-color: var(--sd-accent);
+            box-shadow: 0 0 0 2px rgba(var(--sd-accent-rgb), 0.25);
+        }
+
+        /* ── 主内容区 ── */
+        .main-content-wrap {
+            flex: 1;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+        .main-content-header {
+            flex-shrink: 0;
+            background: rgba(245,245,247,0.85);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            position: sticky; top: 0; z-index: 10;
+            padding: 24px 28px 0 28px;
+        }
+        .main-content-body {
+            flex: 1;
+            overflow-y: auto;
+            padding: 0 28px 28px 28px;
+        }
+
+        /* ── 移动端适配（全面紧凑布局，无横向滚动） ── */
+        @media (max-width: 767px) {
+            body { overflow-x: hidden; }
+
+            /* 全局紧凑间距 */
+            .main-content-header { padding: 8px 12px 0 12px; }
+            .main-content-body { padding: 0 12px 12px 12px; }
+            .page-title { font-size: 17px; padding: 8px 0 4px; margin-bottom: 10px !important; }
+
+            /* 卡片全面压缩 */
+            .card { margin-bottom: 6px; }
+            .card-body { padding: 10px 12px; }
+            .card-header { padding: 8px 12px; font-size: 13px; }
+            .card-header .btn-sm { font-size: 11px; padding: 2px 6px; }
+            .card-footer { padding: 4px 10px; font-size: 11px; }
+            .card.border-0.shadow-sm { margin-bottom: 6px; }
+
+            /* 统计卡片紧凑 */
+            .stat-card { padding: 10px; border-radius: 10px; }
+            .stat-card .number { font-size: 20px; }
+            .stat-card .label { font-size: 11px; }
+            .row.g-2 { --bs-gutter-x: 0.25rem; --bs-gutter-y: 0.25rem; }
+            .row.g-3 { --bs-gutter-x: 0.35rem; --bs-gutter-y: 0.35rem; }
+            .mb-3 { margin-bottom: 6px !important; }
+            .mb-4 { margin-bottom: 8px !important; }
+
+            /* 无横向滚动 */
+            .table-responsive { border: 0; margin-bottom: 0; overflow: visible; }
+            .table-responsive table { min-width: 0; }
+            .table th, .table td { font-size: 11px; padding: 4px !important; }
+
+            /* 隐藏低频列 */
+            .hide-mobile { display: none !important; }
+
+            /* 考勤侧栏堆叠 */
+            .attendance-sidebar { margin-top: 8px; }
+
+            /* 按钮组紧凑 */
+            .btn { font-size: 13px; padding: 4px 10px; border-radius: 6px; }
+            .btn-sm { font-size: 11px; padding: 2px 8px; }
+
+            /* 顶部间距 + 清除侧边栏占位 */
+            .main-content-wrap { padding-top: 48px; margin-left: 0 !important; }
+
+            /* form 元素紧凑 */
+            .form-control, .form-select { font-size: 13px !important; padding: 4px 8px !important; border-radius: 6px; }
+            .form-control-sm { font-size: 11px !important; padding: 2px 6px !important; }
+
+            /* 模态框紧凑 */
+            .modal-header { padding: 10px 14px; }
+            .modal-body { padding: 10px 14px; }
+            .modal-footer { padding: 8px 14px; }
+            .modal-title { font-size: 15px; }
+            .modal-sm { max-width: 94% !important; margin: 20px auto; }
+
+            /* alert 紧凑 */
+            .alert { padding: 8px 12px; font-size: 12px; margin-bottom: 6px; border-radius: 8px; }
+
+            /* 徽章紧凑 */
+            .badge { font-size: 10px; padding: 3px 6px; border-radius: 4px; }
+
+            /* 仪表盘圆环缩小 */
+            .rounded-circle[style*="64px"] { width: 44px !important; height: 44px !important; }
+            .rounded-circle .fs-4 { font-size: 14px !important; }
+
+            /* 移动端顶部栏更矮 */
+            #mobileHeader { padding: 8px 14px !important; }
+            #mobileHeader h5 { font-size: 15px !important; }
+            #mobileHeader .btn-sm { font-size: 11px; padding: 2px 6px; }
+        }
+
+        /* ── 移动端表格卡片模式（≤767px 所有手机生效） ── */
+        @media (max-width: 767px) {
+            .table-card-mode thead { display: none; }
+            .table-card-mode tbody tr {
+                display: block;
+                margin-bottom: 6px;
+                border: 1px solid rgba(0,0,0,0.06);
+                border-radius: 10px;
+                padding: 8px 10px;
+                background: rgba(255,255,255,0.9);
+            }
+            .table-card-mode tbody td {
+                display: flex;
+                justify-content: space-between;
+                padding: 4px 0 !important;
+                border: none;
+                white-space: normal;
+                font-size: 12px;
+                min-height: auto;
+            }
+            .table-card-mode tbody td::before {
+                content: attr(data-label);
+                font-weight: 600;
+                color: #86868b;
+                margin-right: 6px;
+                flex-shrink: 0;
+                font-size: 11px;
+            }
+            .table-card-mode tbody td[data-label="操作"] {
+                justify-content: flex-start;
+                gap: 4px;
+            }
+            .table-card-mode tbody td[data-label="操作"] .btn {
+                font-size: 10px;
+                padding: 1px 4px;
+            }
+            .table-card-mode tbody td[data-label="操作"] .btn i { font-size: 10px; }
+            /* 卡片模式下的下拉框和内联编辑缩小 */
+            .table-card-mode select, .table-card-mode input {
+                font-size: 11px !important;
+                padding: 1px 4px !important;
+                max-width: 140px;
+            }
+        }
+
+        /* ── Offcanvas 移动菜单 (Apple Style, 跟随主题变量) ── */
+        .offcanvas {
+            background: var(--sd-bg);
+            backdrop-filter: blur(40px);
+            -webkit-backdrop-filter: blur(40px);
+            color: var(--sd-text);
+        }
+        .offcanvas .nav-link {
+            color: var(--sd-nav-text);
+            padding: 10px 20px;
+            font-size: 14px;
+            font-weight: 500;
+            border-left: 3px solid transparent;
+            transition: all 0.2s ease;
+        }
+        .offcanvas .nav-link:hover,
+        .offcanvas .nav-link.active {
+            color: var(--sd-active-text);
+            background: var(--sd-active-bg);
+            border-left-color: var(--sd-active-border);
+        }
+        .offcanvas .nav-link i { width: 22px; color: var(--sd-nav-icon); margin-right: 10px; text-align: center; }
+        .offcanvas .nav-link:hover i,
+        .offcanvas .nav-link.active i { color: var(--sd-active-text); }
+        .offcanvas .sub-nav .nav-link {
+            padding-left: 52px;
+            font-size: 13px;
+            border-left: none;
+        }
+        .offcanvas .sub-nav .nav-link:hover { border-left: none; }
+        .offcanvas hr { margin: 4px 20px; border-color: var(--sd-border); opacity: 0.6; }
+        .offcanvas .sem-btn-mobile {
+            display: block;
+            width: 100%;
+            text-align: left;
+            padding: 7px 20px 7px 52px;
+            font-size: 13px;
+            color: var(--sd-nav-text);
+            background: none;
+            border: none;
+            border-radius: 0;
+            transition: all 0.2s ease;
+        }
+        .offcanvas .sem-btn-mobile:hover,
+        .offcanvas .sem-btn-mobile.active {
+            background: var(--sd-sem-hover);
+            color: var(--sd-active-text);
+        }
+        .offcanvas .theme-dot-mb {
+            display: inline-block;
+            width: 28px; height: 28px;
+            border-radius: 50%;
+            cursor: pointer;
+            border: 2px solid var(--sd-border);
+            box-shadow: inset 0 0 0 1px rgba(0,0,0,0.04);
+            transition: all 0.2s;
+            margin-right: 8px;
+            vertical-align: middle;
+        }
+        .offcanvas .theme-dot-mb:hover { transform: scale(1.15); }
+        .offcanvas .theme-dot-mb.active {
+            border-color: var(--sd-accent);
+            box-shadow: 0 0 0 2px rgba(var(--sd-accent-rgb), 0.25);
+        }
+
+        /* ── 表格横向滚动提示 ── */
+        .scroll-hint {
+            display: none;
+            font-size: 12px;
+            color: #86868b;
+            text-align: center;
+            padding: 6px;
+            background: rgba(245,245,247,0.8);
+            border-bottom: 1px solid rgba(0,0,0,0.04);
+        }
+        @media (max-width: 767px) {
+            .scroll-hint { display: block; }
+        }
+    </style>
+</head>
+<body>
+<script>/* 主题防闪烁：渲染前即挂载已保存主题 class */try{var _t=localStorage.getItem('sidebar_theme');if(_t&&_t!=='default'){document.body.classList.add('theme-'+_t);}}catch(e){}</script>
+
+<div class="container-fluid p-0">
+<div class="d-flex position-relative">
+
+    <!-- ========== 桌面侧边栏 ========== -->
+    <div class="sidebar d-none d-md-block">
+        <div class="logo"><i class="fas fa-graduation-cap"></i> 教务管理</div>
+        <ul class="nav flex-column">
+            <li class="nav-item"><a class="nav-link {% if request.path == '/' %}active{% endif %}" href="/"><i class="fas fa-home"></i> 首页仪表盘</a></li>
+            {% if current_user and current_user.role == 'admin' %}
+            <li class="nav-item">
+                <a class="nav-link" href="#" data-bs-toggle="collapse" data-bs-target="#baseSub"><i class="fas fa-database"></i> 基础数据 <i class="fas fa-chevron-down" style="font-size:10px;float:right;margin-top:5px"></i></a>
+                <div class="collapse sub-nav {% if '/classes' in request.path or '/teachers' in request.path or '/courses' in request.path or '/classrooms' in request.path or '/textbooks' in request.path or '/import' in request.path %}show{% endif %}" id="baseSub">
+                    <ul class="nav flex-column">
+                        <li class="nav-item"><a class="nav-link" href="/classes"><i class="fas fa-users"></i> 班级管理</a></li>
+                        <li class="nav-item"><a class="nav-link" href="/teachers"><i class="fas fa-user-tie"></i> 教师管理</a></li>
+                        <li class="nav-item"><a class="nav-link" href="/courses"><i class="fas fa-book-open"></i> 课程管理</a></li>
+                        <li class="nav-item"><a class="nav-link" href="/classrooms"><i class="fas fa-door-open"></i> 教室管理</a></li>
+                        <li class="nav-item"><a class="nav-link" href="/textbooks"><i class="fas fa-book"></i> 教材库</a></li>
+                    </ul>
+                </div>
+            </li>
+            <li class="nav-item">
+                <a class="nav-link" href="#" data-bs-toggle="collapse" data-bs-target="#bookSub"><i class="fas fa-truck"></i> 订书发书 <i class="fas fa-chevron-down" style="font-size:10px;float:right;margin-top:5px"></i></a>
+                <div class="collapse sub-nav {% if '/orders' in request.path or '/issues' in request.path or '/books/' in request.path %}show{% endif %}" id="bookSub">
+                    <ul class="nav flex-column">
+                        <li class="nav-item"><a class="nav-link" href="/orders"><i class="fas fa-clipboard-list"></i> 征订计划</a></li>
+                        <li class="nav-item"><a class="nav-link" href="/issues"><i class="fas fa-hand-holding"></i> 发书记录</a></li>
+                        <li class="nav-item"><a class="nav-link" href="/books/stats"><i class="fas fa-chart-pie"></i> 教材统计</a></li>
+                    </ul>
+                </div>
+            </li>
+            <li class="nav-item">
+                <a class="nav-link" href="#" data-bs-toggle="collapse" data-bs-target="#scheduleSub"><i class="fas fa-calendar-alt"></i> 排课管理 <i class="fas fa-chevron-down" style="font-size:10px;float:right;margin-top:5px"></i></a>
+                <div class="collapse sub-nav {% if '/tasks' in request.path or '/schedule' in request.path %}show{% endif %}" id="scheduleSub">
+                    <ul class="nav flex-column">
+                        <li class="nav-item"><a class="nav-link" href="/tasks"><i class="fas fa-tasks"></i> 教学任务</a></li>
+                        <li class="nav-item"><a class="nav-link" href="/schedule"><i class="fas fa-table"></i> 班级课表</a></li>
+                        <li class="nav-item"><a class="nav-link" href="/schedule/teacher"><i class="fas fa-chalkboard-teacher"></i> 教师课表</a></li>
+                        <li class="nav-item"><a class="nav-link" href="/schedule/room"><i class="fas fa-door-open"></i> 教室课表</a></li>
+                    </ul>
+                </div>
+            </li>
+            <li class="nav-item">
+                <a class="nav-link" href="#" data-bs-toggle="collapse" data-bs-target="#leaveSub"><i class="fas fa-exchange-alt"></i> 调课管理 <i class="fas fa-chevron-down" style="font-size:10px;float:right;margin-top:5px"></i></a>
+                <div class="collapse sub-nav {% if '/leaves' in request.path %}show{% endif %}" id="leaveSub">
+                    <ul class="nav flex-column">
+                        <li class="nav-item"><a class="nav-link" href="/leaves"><i class="fas fa-exchange-alt"></i> 调课登记</a></li>
+                        <li class="nav-item"><a class="nav-link" href="/leaves/stats"><i class="fas fa-money-bill-wave"></i> 顶课补助统计</a></li>
+                    </ul>
+                </div>
+            </li>
+            <li class="nav-item">
+                <a class="nav-link" href="#" data-bs-toggle="collapse" data-bs-target="#workloadSub"><i class="fas fa-hourglass-half"></i> 超课时统计 <i class="fas fa-chevron-down" style="font-size:10px;float:right;margin-top:5px"></i></a>
+                <div class="collapse sub-nav {% if '/standards' in request.path or '/holidays' in request.path or '/workload' in request.path %}show{% endif %}" id="workloadSub">
+                    <ul class="nav flex-column">
+                        <li class="nav-item"><a class="nav-link" href="/standards"><i class="fas fa-balance-scale"></i> 课时标准</a></li>
+                        <li class="nav-item"><a class="nav-link" href="/holidays"><i class="fas fa-umbrella-beach"></i> 停课日管理</a></li>
+                        <li class="nav-item"><a class="nav-link" href="/workload"><i class="fas fa-chart-bar"></i> 超课时统计</a></li>
+                    </ul>
+                </div>
+            </li>
+            <li class="nav-item">
+                <a class="nav-link" href="#" data-bs-toggle="collapse" data-bs-target="#nightSub"><i class="fas fa-moon"></i> 夜自习管理 <i class="fas fa-chevron-down" style="font-size:10px;float:right;margin-top:5px"></i></a>
+                <div class="collapse sub-nav {% if '/night' in request.path %}show{% endif %}" id="nightSub">
+                    <ul class="nav flex-column">
+                        <li class="nav-item"><a class="nav-link" href="/night"><i class="fas fa-calendar-check"></i> 夜自习排班</a></li>
+                        <li class="nav-item"><a class="nav-link" href="/night/stats"><i class="fas fa-chart-line"></i> 夜自习统计</a></li>
+                    </ul>
+                </div>
+            </li>
+            <li class="nav-item">
+                <a class="nav-link" href="#" data-bs-toggle="collapse" data-bs-target="#otSub"><i class="fas fa-clock"></i> 加班管理费 <i class="fas fa-chevron-down" style="font-size:10px;float:right;margin-top:5px"></i></a>
+                <div class="collapse sub-nav {% if '/overtimes' in request.path or '/fees' in request.path %}show{% endif %}" id="otSub">
+                    <ul class="nav flex-column">
+                        <li class="nav-item"><a class="nav-link" href="/overtimes"><i class="fas fa-business-time"></i> 加班记录</a></li>
+                        <li class="nav-item"><a class="nav-link" href="/fees"><i class="fas fa-coins"></i> 管理费</a></li>
+                    </ul>
+                </div>
+            </li>
+            {% endif %}
+            <li class="nav-item"><a class="nav-link {% if '/payments' in request.path %}active{% endif %}" href="/payments"><i class="fas fa-coins"></i> 补助发放</a></li>
+            <li class="nav-item"><a class="nav-link {% if '/reports' in request.path %}active{% endif %}" href="/reports"><i class="fas fa-file-invoice-dollar"></i> 综合报表</a></li>
+            {% if current_user and current_user.role == 'admin' %}
+            <li class="nav-item"><a class="nav-link {% if '/settings' in request.path %}active{% endif %}" href="/settings"><i class="fas fa-cog"></i> 系统设置</a></li>
+            <li class="nav-item"><a class="nav-link {% if '/data' in request.path %}active{% endif %}" href="/data"><i class="fas fa-database"></i> 数据管理</a></li>
+            <li class="nav-item"><a class="nav-link {% if '/logs' in request.path %}active{% endif %}" href="/logs"><i class="fas fa-history"></i> 操作日志</a></li>
+            <li class="nav-item"><hr></li>
+            {% endif %}
+        </ul>
+
+        <!-- 学期管理 -->
+        <div class="px-3 py-1 sem-section">
+            <a class="nav-link d-block" href="#" data-bs-toggle="collapse" data-bs-target="#semSub" style="color:var(--sd-nav-text);padding:4px 0;font-size:12px;font-weight:500">
+                <i class="fas fa-calendar-alt" style="color:var(--sd-logo-icon);margin-right:8px"></i> 学期管理
+                <i class="fas fa-chevron-down" style="font-size:9px;float:right;margin-top:4px;opacity:0.5"></i>
+            </a>
+            <div class="collapse" id="semSub">
+                {% for s in semesters %}
+                <div class="d-flex align-items-center gap-1 py-1" style="padding-left:4px">
+                    <form method="post" action="/semester/set" class="flex-grow-1" style="margin:0">
+                        <button type="submit" name="semester_id" value="{{ s.id }}"
+                            class="sem-btn{% if current_semester and s.id == current_semester.id %} active{% endif %}">
+                            {{ s.name }}
+                        </button>
+                    </form>
+                    {% if current_user and current_user.role == 'admin' %}
+                    <a href="#" onclick="showRenameSemester({{ s.id }},{{ s.name|tojson|forceescape }});return false" style="color:var(--sd-footer-text);font-size:10px" title="重命名"><i class="fas fa-edit"></i></a>
+                    {% if semesters|length > 1 %}
+                    <a href="#" onclick="confirmDelSemester({{ s.id }});return false" style="color:#ff6666;font-size:10px" title="删除"><i class="fas fa-times"></i></a>
+                    {% endif %}
+                    {% endif %}
+                </div>
+                {% endfor %}
+                {% if current_user and current_user.role == 'admin' %}
+                <div class="text-center pt-1">
+                    <a href="#" onclick="showNewSemester();return false" style="color:var(--sd-logo-icon);font-size:11px;text-decoration:none"><i class="fas fa-plus"></i> 新建学期</a>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+
+        <!-- 主题选择器 -->
+        <div class="theme-picker">
+            <div class="picker-label"><i class="fas fa-palette" style="margin-right:4px"></i> 主题颜色</div>
+            <div>
+                <span class="theme-dot active" data-theme="default"  style="background:#f5f5f7" title="默认"></span>
+                <span class="theme-dot" data-theme="skyblue"  style="background:#e3f2fd" title="天空蓝"></span>
+                <span class="theme-dot" data-theme="mint"     style="background:#e8f5e9" title="薄荷绿"></span>
+                <span class="theme-dot" data-theme="cream"    style="background:#fff8e1" title="暖米色"></span>
+                <span class="theme-dot" data-theme="lavender" style="background:#f3e5f5" title="淡紫色"></span>
+                <span class="theme-dot" data-theme="gray"     style="background:#eceff1" title="静谧灰"></span>
+                <span class="theme-dot" data-theme="dark"     style="background:#1c1c1e" title="石墨黑"></span>
+                <span class="theme-dot" data-theme="navy"     style="background:#0e1b2e" title="深海蓝"></span>
+            </div>
+        </div>
+
+        <div class="sidebar-footer">
+            <div style="margin-bottom:4px;font-weight:500;font-size:12px;color:var(--sd-text)">{{ session.get('username','') }}</div>
+            <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap">
+                <a href="/change-password" class="logout-link"><i class="fas fa-key" style="margin-right:4px"></i> 修改密码</a>
+                <form method="post" action="/logout" style="margin:0"><button type="submit" class="logout-link" style="background:none;border:none;cursor:pointer"><i class="fas fa-sign-out-alt" style="margin-right:4px"></i> 退出登录</button></form>
+            </div>
+        </div>
+    </div>
+
+    <!-- ========== 移动端顶部栏 ========== -->
+    <div id="mobileHeader" class="d-md-none position-fixed top-0 start-0 end-0" style="z-index:99;background:rgba(255,255,255,0.92);backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);border-bottom:1px solid rgba(0,0,0,0.06);padding:12px 16px;">
+        <div class="d-flex justify-content-between align-items-center">
+            <h5 class="mb-0" style="font-size:17px;font-weight:700;letter-spacing:-0.02em"><i class="fas fa-graduation-cap" style="color:var(--sd-accent);margin-right:8px"></i> 教务管理</h5>
+            <button class="btn btn-sm" style="background:rgba(var(--sd-accent-rgb),0.10);color:var(--sd-accent);border:none" data-bs-toggle="offcanvas" data-bs-target="#mobileMenu">
+                <i class="fas fa-bars"></i>
+            </button>
+        </div>
+    </div>
+
+    <!-- ========== 主内容区 ========== -->
+    <div class="main-content-wrap" style="margin-left:220px;">
+        <div class="main-content-header">
+            <nav class="breadcrumb-nav no-print" style="font-size:12px;color:#86868b;margin-bottom:8px">
+                {% for name, url in breadcrumb() %}{% if url %}<a href="{{ url }}" style="color:#86868b;text-decoration:none">{{ name }}</a> <span style="color:#c7c7cc">/</span> {% else %}<strong style="color:#1d1d1f">{{ name }}</strong>{% endif %}{% endfor %}
+            </nav>
+            <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2 no-print" style="font-size:13px;color:#86868b">
+                <div>
+                    <i class="fas fa-calendar-alt" style="color:#007aff;margin-right:6px"></i> 当前学期：<strong style="color:#1d1d1f">{{ current_semester.name if current_semester else '（未创建，请先新建学期）' }}</strong>
+                </div>
+                <form method="get" action="/search" class="d-flex gap-1" style="max-width:280px">
+                    <input type="text" name="q" class="form-control form-control-sm" placeholder="搜索教师 / 班级 / 课程 / 教材…" value="{{ request.args.get('q','') }}">
+                    <button class="btn btn-sm btn-outline-primary"><i class="fas fa-search"></i></button>
+                </form>
+            </div>
+            {% with messages = get_flashed_messages() %}
+            {% if messages %}
+            <div class="alert alert-success alert-dismissible fade show" style="border-radius:10px">
+                {% for msg in messages %}{{ msg }}{% endfor %}
+                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+            </div>
+            {% endif %}
+            {% endwith %}
+            </div>
+            <div class="main-content-body">
+            {% block content %}{% endblock %}
+            </div>
+
+    <!-- 新建学期模态框 -->
+    <div class="modal fade" id="newSemesterModal" tabindex="-1" data-bs-backdrop="static">
+        <div class="modal-dialog modal-sm">
+            <form class="modal-content" method="post" action="/semester/add">
+                <div class="modal-header"><h6 class="modal-title"><i class="fas fa-plus"></i> 新建学期</h6><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+                <div class="modal-body">
+                    <div class="mb-2">
+                        <label class="form-label">学年</label>
+                        <div class="d-flex gap-2 align-items-center">
+                            <input type="number" name="start_year" class="form-control form-control-sm" value="2026" required style="width:80px" oninput="document.getElementById('semEndYear').value = this.value && parseInt(this.value)+1 || ''">
+                            <span>—</span>
+                            <input type="number" id="semEndYear" class="form-control form-control-sm" value="2027" readonly style="width:80px;background:#f0f0f0">
+                        </div>
+                    </div>
+                    <div class="mb-2">
+                        <label class="form-label">学期</label>
+                        <select name="semester_num" class="form-select form-control-sm">
+                            <option value="1">第1学期（秋季）</option>
+                            <option value="2">第2学期（春季）</option>
+                        </select>
+                    </div>
+                    <div class="mb-2">
+                        <label class="form-label">开始日期</label>
+                        <input type="date" name="start_date" class="form-control form-control-sm" required>
+                    </div>
+                    <div class="mb-2">
+                        <label class="form-label">结束日期</label>
+                        <input type="date" name="end_date" class="form-control form-control-sm" required>
+                    </div>
+                    <hr style="margin:12px 0;opacity:0.15">
+                    <div class="mb-2">
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" id="inheritDataCheck" checked onchange="document.getElementById('inheritDataWrap').style.display = this.checked ? 'block' : 'none'">
+                            <label class="form-check-label" for="inheritDataCheck" style="font-size:12px;font-weight:500"><i class="fas fa-copy" style="color:var(--sd-accent);margin-right:4px"></i> 从上学期继承数据（可选）</label>
+                        </div>
+                        <div id="inheritDataWrap" style="display:block" class="mt-2">
+                            <label class="form-label" style="font-size:11px;color:#86868b">来源学期</label>
+                            <select name="inherit_from" class="form-select form-control-sm">
+                                {% for s in semesters %}
+                                <option value="{{ s.id }}">{{ s.name }}</option>
+                                {% endfor %}
+                            </select>
+                            <label class="form-label mt-2" style="font-size:11px;color:#86868b">继承内容（勾选；关联自动重映射）</label>
+                            <div class="d-flex flex-wrap gap-x-3" style="font-size:12px;row-gap:6px">
+                                <div class="form-check me-3">
+                                    <input class="form-check-input" type="checkbox" name="inherit_types" value="classes" id="it_classes" checked>
+                                    <label class="form-check-label" for="it_classes">班级</label>
+                                </div>
+                                <div class="form-check me-3">
+                                    <input class="form-check-input" type="checkbox" name="inherit_types" value="teachers" id="it_teachers" checked>
+                                    <label class="form-check-label" for="it_teachers">教师</label>
+                                </div>
+                                <div class="form-check me-3">
+                                    <input class="form-check-input" type="checkbox" name="inherit_types" value="courses" id="it_courses" checked>
+                                    <label class="form-check-label" for="it_courses">课程</label>
+                                </div>
+                                <div class="form-check me-3">
+                                    <input class="form-check-input" type="checkbox" name="inherit_types" value="classrooms" id="it_classrooms" checked>
+                                    <label class="form-check-label" for="it_classrooms">教室</label>
+                                </div>
+                                <div class="form-check me-3">
+                                    <input class="form-check-input" type="checkbox" name="inherit_types" value="textbooks" id="it_textbooks" checked>
+                                    <label class="form-check-label" for="it_textbooks">教材库</label>
+                                </div>
+                                <div class="form-check me-3">
+                                    <input class="form-check-input" type="checkbox" name="inherit_types" value="tasks" id="it_tasks">
+                                    <label class="form-check-label" for="it_tasks">教学任务</label>
+                                </div>
+                                <div class="form-check me-3">
+                                    <input class="form-check-input" type="checkbox" name="inherit_types" value="schedule" id="it_schedule">
+                                    <label class="form-check-label" for="it_schedule">课表</label>
+                                </div>
+                            </div>
+                            <div style="font-size:11px;color:#86868b;margin-top:6px">
+                                <i class="fas fa-info-circle"></i> 停课日、订书发书、请假、夜自习、加班等学期专属数据不继承
+                            </div>
+                        </div>
+                    </div>
+                    <div class="mb-2" style="font-size:12px;color:#86868b">
+                        <i class="fas fa-info-circle"></i> 教学周数可在学期管理中手动设置，留空则按「工作日 − 停课日」自动计算
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-sm btn-secondary" data-bs-dismiss="modal">取消</button>
+                    <button type="submit" class="btn btn-sm btn-primary">创建</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- 重命名学期模态框 -->
+    <div class="modal fade" id="renameSemesterModal" tabindex="-1">
+        <div class="modal-dialog modal-sm">
+            <form class="modal-content" method="post" action="" id="renameSemesterForm">
+                <div class="modal-header"><h6 class="modal-title"><i class="fas fa-edit"></i> 重命名学期</h6><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+                <div class="modal-body">
+                    <div class="mb-2">
+                        <label class="form-label">新名称</label>
+                        <input type="text" name="name" id="renameSemesterInput" class="form-control form-control-sm" required>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-sm btn-secondary" data-bs-dismiss="modal">取消</button>
+                    <button type="submit" class="btn btn-sm btn-primary">保存</button>
+                </div>
+            </form>
+        </div>
+    </div>
+        </div>
+    </div>
+</div>
+
+<!-- ========== 移动端 Offcanvas 菜单（完整版） ========== -->
+<div class="offcanvas offcanvas-start" id="mobileMenu">
+    <div class="offcanvas-header" style="border-bottom:1px solid var(--sd-border);padding:16px 20px">
+        <h5 style="font-size:17px;font-weight:700;letter-spacing:-0.02em;margin:0"><i class="fas fa-graduation-cap" style="color:var(--sd-accent);margin-right:8px"></i> 教务管理</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="offcanvas"></button>
+    </div>
+    <div class="offcanvas-body p-0">
+        <ul class="nav flex-column">
+            <li class="nav-item"><a class="nav-link {% if request.path == '/' %}active{% endif %}" href="/"><i class="fas fa-home"></i> 首页</a></li>
+            {% if current_user and current_user.role == 'admin' %}
+            <li class="nav-item">
+                <a class="nav-link" href="#" data-bs-toggle="collapse" data-bs-target="#m_baseSub"><i class="fas fa-database"></i> 基础数据 <i class="fas fa-chevron-down" style="font-size:10px;float:right;margin-top:5px"></i></a>
+                <div class="collapse sub-nav" id="m_baseSub">
+                    <ul class="nav flex-column">
+                        <li class="nav-item"><a class="nav-link" href="/classes"><i class="fas fa-users"></i> 班级管理</a></li>
+                        <li class="nav-item"><a class="nav-link" href="/teachers"><i class="fas fa-user-tie"></i> 教师管理</a></li>
+                        <li class="nav-item"><a class="nav-link" href="/courses"><i class="fas fa-book-open"></i> 课程管理</a></li>
+                        <li class="nav-item"><a class="nav-link" href="/classrooms"><i class="fas fa-door-open"></i> 教室管理</a></li>
+                        <li class="nav-item"><a class="nav-link" href="/textbooks"><i class="fas fa-book"></i> 教材库</a></li>
+                    </ul>
+                </div>
+            </li>
+            <li class="nav-item">
+                <a class="nav-link" href="#" data-bs-toggle="collapse" data-bs-target="#m_bookSub"><i class="fas fa-truck"></i> 订书发书 <i class="fas fa-chevron-down" style="font-size:10px;float:right;margin-top:5px"></i></a>
+                <div class="collapse sub-nav" id="m_bookSub">
+                    <ul class="nav flex-column">
+                        <li class="nav-item"><a class="nav-link" href="/orders"><i class="fas fa-clipboard-list"></i> 征订计划</a></li>
+                        <li class="nav-item"><a class="nav-link" href="/issues"><i class="fas fa-hand-holding"></i> 发书记录</a></li>
+                        <li class="nav-item"><a class="nav-link" href="/books/stats"><i class="fas fa-chart-pie"></i> 教材统计</a></li>
+                    </ul>
+                </div>
+            </li>
+            <li class="nav-item">
+                <a class="nav-link" href="#" data-bs-toggle="collapse" data-bs-target="#m_scheduleSub"><i class="fas fa-calendar-alt"></i> 排课管理 <i class="fas fa-chevron-down" style="font-size:10px;float:right;margin-top:5px"></i></a>
+                <div class="collapse sub-nav" id="m_scheduleSub">
+                    <ul class="nav flex-column">
+                        <li class="nav-item"><a class="nav-link" href="/tasks"><i class="fas fa-tasks"></i> 教学任务</a></li>
+                        <li class="nav-item"><a class="nav-link" href="/schedule"><i class="fas fa-table"></i> 班级课表</a></li>
+                        <li class="nav-item"><a class="nav-link" href="/schedule/teacher"><i class="fas fa-chalkboard-teacher"></i> 教师课表</a></li>
+                        <li class="nav-item"><a class="nav-link" href="/schedule/room"><i class="fas fa-door-open"></i> 教室课表</a></li>
+                    </ul>
+                </div>
+            </li>
+            <li class="nav-item">
+                <a class="nav-link" href="#" data-bs-toggle="collapse" data-bs-target="#m_leaveSub"><i class="fas fa-exchange-alt"></i> 调课管理 <i class="fas fa-chevron-down" style="font-size:10px;float:right;margin-top:5px"></i></a>
+                <div class="collapse sub-nav" id="m_leaveSub">
+                    <ul class="nav flex-column">
+                        <li class="nav-item"><a class="nav-link" href="/leaves"><i class="fas fa-exchange-alt"></i> 调课登记</a></li>
+                        <li class="nav-item"><a class="nav-link" href="/leaves/stats"><i class="fas fa-money-bill-wave"></i> 顶课补助统计</a></li>
+                    </ul>
+                </div>
+            </li>
+            <li class="nav-item">
+                <a class="nav-link" href="#" data-bs-toggle="collapse" data-bs-target="#m_workloadSub"><i class="fas fa-hourglass-half"></i> 超课时统计 <i class="fas fa-chevron-down" style="font-size:10px;float:right;margin-top:5px"></i></a>
+                <div class="collapse sub-nav" id="m_workloadSub">
+                    <ul class="nav flex-column">
+                        <li class="nav-item"><a class="nav-link" href="/standards"><i class="fas fa-balance-scale"></i> 课时标准</a></li>
+                        <li class="nav-item"><a class="nav-link" href="/holidays"><i class="fas fa-umbrella-beach"></i> 停课日管理</a></li>
+                        <li class="nav-item"><a class="nav-link" href="/workload"><i class="fas fa-chart-bar"></i> 超课时统计</a></li>
+                    </ul>
+                </div>
+            </li>
+            <li class="nav-item">
+                <a class="nav-link" href="#" data-bs-toggle="collapse" data-bs-target="#m_nightSub"><i class="fas fa-moon"></i> 夜自习管理 <i class="fas fa-chevron-down" style="font-size:10px;float:right;margin-top:5px"></i></a>
+                <div class="collapse sub-nav" id="m_nightSub">
+                    <ul class="nav flex-column">
+                        <li class="nav-item"><a class="nav-link" href="/night"><i class="fas fa-calendar-check"></i> 夜自习排班</a></li>
+                        <li class="nav-item"><a class="nav-link" href="/night/stats"><i class="fas fa-chart-line"></i> 夜自习统计</a></li>
+                    </ul>
+                </div>
+            </li>
+            <li class="nav-item">
+                <a class="nav-link" href="#" data-bs-toggle="collapse" data-bs-target="#m_otSub"><i class="fas fa-clock"></i> 加班管理费 <i class="fas fa-chevron-down" style="font-size:10px;float:right;margin-top:5px"></i></a>
+                <div class="collapse sub-nav" id="m_otSub">
+                    <ul class="nav flex-column">
+                        <li class="nav-item"><a class="nav-link" href="/overtimes"><i class="fas fa-business-time"></i> 加班记录</a></li>
+                        <li class="nav-item"><a class="nav-link" href="/fees"><i class="fas fa-coins"></i> 管理费</a></li>
+                    </ul>
+                </div>
+            </li>
+            {% endif %}
+            <li class="nav-item"><a class="nav-link" href="/reports"><i class="fas fa-file-invoice-dollar"></i> 综合报表</a></li>
+            {% if current_user and current_user.role == 'admin' %}
+            <li class="nav-item"><a class="nav-link" href="/settings"><i class="fas fa-cog"></i> 系统设置</a></li>
+            {% endif %}
+            <li class="nav-item"><hr></li>
+        </ul>
+
+        <!-- 学期管理 -->
+        <div class="px-3 py-2">
+            <a class="d-block" href="#" data-bs-toggle="collapse" data-bs-target="#m_semSub" style="color:var(--sd-text);font-size:13px;padding:6px 0;text-decoration:none">
+                <i class="fas fa-calendar-alt" style="color:var(--sd-logo-icon);width:20px"></i> 学期管理
+                <i class="fas fa-chevron-down" style="font-size:10px;float:right;margin-top:4px"></i>
+            </a>
+            <div class="collapse" id="m_semSub">
+                <form method="post" action="/semester/set" id="mobileSemForm">
+                {% for s in semesters %}
+                    <button type="submit" name="semester_id" value="{{ s.id }}"
+                        class="sem-btn-mobile{% if current_semester and s.id == current_semester.id %} active{% endif %}">
+                        {{ s.name }}
+                    </button>
+                {% endfor %}
+                </form>
+                <div class="text-center pt-1">
+                    {% if current_user and current_user.role == 'admin' %}
+                    <a href="#" onclick="showNewSemester();$('#mobileMenu').offcanvas('hide');return false" style="color:var(--sd-logo-icon);font-size:12px;text-decoration:none"><i class="fas fa-plus"></i> 新建学期</a>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+
+        <!-- 移动端主题选择器 -->
+        <div class="px-3 py-2 border-top" style="border-top-color:var(--sd-border)">
+            <div style="font-size:11px;color:var(--sd-footer-text);margin-bottom:6px"><i class="fas fa-palette"></i> 主题颜色</div>
+            <div>
+                <span class="theme-dot-mb active" data-theme="default"  style="background:#f5f5f7" title="默认"></span>
+                <span class="theme-dot-mb" data-theme="skyblue"  style="background:#e3f2fd" title="天空蓝"></span>
+                <span class="theme-dot-mb" data-theme="mint"     style="background:#e8f5e9" title="薄荷绿"></span>
+                <span class="theme-dot-mb" data-theme="cream"    style="background:#fff8e1" title="暖米色"></span>
+                <span class="theme-dot-mb" data-theme="lavender" style="background:#f3e5f5" title="淡紫色"></span>
+                <span class="theme-dot-mb" data-theme="gray"     style="background:#eceff1" title="静谧灰"></span>
+                <span class="theme-dot-mb" data-theme="dark"     style="background:#1c1c1e" title="石墨黑"></span>
+                <span class="theme-dot-mb" data-theme="navy"     style="background:#0e1b2e" title="深海蓝"></span>
+            </div>
+        </div>
+
+        <div class="border-top px-3 py-2 d-flex justify-content-between align-items-center" style="border-top-color:var(--sd-border)">
+            <small style="color:var(--sd-footer-text)">{{ session.get('username','') }}</small>
+            <div class="d-flex align-items-center" style="gap:8px">
+                <a href="/change-password" class="btn btn-sm btn-outline-secondary"><i class="fas fa-key"></i> 改密</a>
+                <form method="post" action="/logout" style="margin:0"><button type="submit" class="btn btn-sm btn-outline-danger"><i class="fas fa-sign-out-alt"></i> 退出</button></form>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script src="/static/bootstrap.bundle.min.js"></script>
+<script>
+/* ── CSRF 防护（H5）：meta token + 表单自动注入 + fetch 拦截 + POST 删除助手 ── */
+function cmCsrfToken() {
+    var m = document.querySelector('meta[name="csrf-token"]');
+    return m ? m.getAttribute('content') : '';
+}
+(function() {
+    var token = cmCsrfToken();
+    if (!token) return;
+    // 自动给所有 POST 表单注入 hidden _csrf
+    document.querySelectorAll('form[method="post"]').forEach(function(f) {
+        if (!f.querySelector('input[name="_csrf"]')) {
+            var h = document.createElement('input');
+            h.type = 'hidden'; h.name = '_csrf'; h.value = token;
+            f.appendChild(h);
+        }
+    });
+    // fetch POST 自动带 X-CSRF-Token
+    var origFetch = window.fetch;
+    window.fetch = function(url, opts) {
+        opts = opts || {};
+        if (opts.method && String(opts.method).toUpperCase() === 'POST') {
+            opts.headers = opts.headers || {};
+            if (opts.headers instanceof Headers) { if (!opts.headers.has('X-CSRF-Token')) opts.headers.set('X-CSRF-Token', token); }
+            else if (!opts.headers['X-CSRF-Token']) opts.headers['X-CSRF-Token'] = token;
+        }
+        return origFetch(url, opts);
+    };
+})();
+function postDelete(url, msg) {
+    if (!confirm(msg || '确定删除？')) return false;
+    fetch(url, {method: 'POST', headers: {'X-CSRF-Token': cmCsrfToken()}})
+        .then(function(r) {
+            if (r.redirected || r.ok) { window.location.reload(); }
+            else { alert('删除失败（' + r.status + '），请重试'); }
+        })
+        .catch(function() { alert('删除失败，请重试'); });
+    return false;
+}
+function showNewSemester() {
+    var m = new bootstrap.Modal(document.getElementById('newSemesterModal'));
+    m.show();
+}
+function showRenameSemester(id, name) {
+    document.getElementById('renameSemesterInput').value = name;
+    document.getElementById('renameSemesterForm').action = '/semester/' + id + '/rename';
+    var m = new bootstrap.Modal(document.getElementById('renameSemesterModal'));
+    m.show();
+}
+function confirmDelSemester(id) {
+    if (!confirm('确定要删除此学期吗？所有关联数据将被永久删除！')) return;
+    if (!confirm('再次确认：此操作不可撤销！')) return;
+    fetch('/semester/' + id + '/delete', {method:'POST'}).then(function(r){location.reload();});
+}
+/* ── 主题切换 ── */
+(function() {
+    var THEMES = ['default','skyblue','mint','cream','lavender','gray','dark','navy'];
+    var allDots = document.querySelectorAll('.theme-dot, .theme-dot-mb');
+    function setTheme(name) {
+        if (!name || THEMES.indexOf(name) === -1) name = 'default';
+        // 按主题清单切换 body 上的 theme-* class（default 不挂 class）
+        THEMES.forEach(function(t) {
+            document.body.classList.toggle('theme-' + t, t !== 'default' && t === name);
+        });
+        // 更新所有色块的选中状态
+        allDots.forEach(function(d) { d.classList.remove('active'); });
+        document.querySelectorAll('.theme-dot[data-theme="' + name + '"], .theme-dot-mb[data-theme="' + name + '"]').forEach(function(d) {
+            d.classList.add('active');
+        });
+        try { localStorage.setItem('sidebar_theme', name); } catch(e) {}
+    }
+    allDots.forEach(function(dot) {
+        dot.addEventListener('click', function() {
+            setTheme(this.dataset.theme);
+            // 移动端：选择后自动关闭 offcanvas 菜单
+            var mobileMenu = document.getElementById('mobileMenu');
+            if (mobileMenu && mobileMenu.classList.contains('show')) {
+                var bsOffcanvas = bootstrap.Offcanvas.getInstance(mobileMenu);
+                if (bsOffcanvas) bsOffcanvas.hide();
+            }
+        });
+    });
+    try {
+        var saved = localStorage.getItem('sidebar_theme');
+        if (saved) setTheme(saved);
+    } catch(e) {}
+})();
+</script>
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    /* ── 可拖动列宽 ── */
+    document.querySelectorAll('.table-resizable').forEach(function(table) {
+        const tableId = table.id || table.className.replace(/\s+/g, '_');
+        const headers = table.querySelectorAll('th');
+        let savedWidths = {};
+        try { savedWidths = JSON.parse(localStorage.getItem('colwidths_' + tableId) || '{}'); } catch(e) {}
+        headers.forEach(function(th, idx) {
+            if (savedWidths[idx]) th.style.width = savedWidths[idx];
+            const resizer = document.createElement('div');
+            resizer.style.cssText = 'position:absolute;right:0;top:0;bottom:0;width:5px;cursor:col-resize;z-index:10;';
+            th.style.position = 'relative'; th.appendChild(resizer);
+            let startX, startWidth;
+            resizer.addEventListener('mousedown', function(e) {
+                startX = e.clientX; startWidth = th.offsetWidth;
+                document.body.style.cursor = 'col-resize'; document.body.style.userSelect = 'none';
+                function onMouseMove(e) {
+                    const diff = e.clientX - startX;
+                    th.style.width = Math.max(40, startWidth + diff) + 'px';
+                }
+                function onMouseUp() {
+                    document.body.style.cursor = ''; document.body.style.userSelect = '';
+                    document.removeEventListener('mousemove', onMouseMove);
+                    document.removeEventListener('mouseup', onMouseUp);
+                    const allWidths = {};
+                    headers.forEach(function(h, i) { allWidths[i] = h.style.width || h.offsetWidth + 'px'; });
+                    try { localStorage.setItem('colwidths_' + tableId, JSON.stringify(allWidths)); } catch(e) {}
+                }
+                document.addEventListener('mousemove', onMouseMove);
+                document.addEventListener('mouseup', onMouseUp);
+                e.preventDefault();
+            });
+        });
+    });
+
+    /* ── 表格排序 ── */
+    document.querySelectorAll('.table-sortable').forEach(function(table) {
+        const headers = table.querySelectorAll('th'); const tbody = table.querySelector('tbody');
+        if (!tbody) return;
+        headers.forEach(function(th, colIdx) {
+            if (th.querySelector('a') || th.querySelector('button') || th.innerText.trim() === '操作' || th.innerText.trim() === '#' || th.hasAttribute('data-no-sort')) return;
+            th.style.cursor = 'pointer'; th.title = '点击排序';
+            th.addEventListener('click', function() {
+                const isAsc = th.classList.contains('sort-asc');
+                headers.forEach(function(h) { h.classList.remove('sort-asc', 'sort-desc'); });
+                const rows = Array.from(tbody.querySelectorAll('tr'));
+                function getCellValue(row, idx) {
+                    const cell = row.children[idx]; if (!cell) return '';
+                    let val = cell.innerText.trim();
+                    const num = parseFloat(val.replace(/[,，]/g, ''));
+                    if (!isNaN(num) && val.replace(/[,，\s]/g, '') !== '') return num;
+                    const dateMatch = val.match(/(\d{4})-(\d{2})-(\d{2})/);
+                    if (dateMatch) return dateMatch[0];
+                    return val;
+                }
+                if (isAsc) {
+                    th.classList.add('sort-desc');
+                    rows.sort(function(a,b){var va=getCellValue(a,colIdx),vb=getCellValue(b,colIdx);if(typeof va==='number'&&typeof vb==='number')return vb-va;return String(vb).localeCompare(String(va),'zh-CN');});
+                } else {
+                    th.classList.add('sort-asc');
+                    rows.sort(function(a,b){var va=getCellValue(a,colIdx),vb=getCellValue(b,colIdx);if(typeof va==='number'&&typeof vb==='number')return va-vb;return String(va).localeCompare(String(vb),'zh-CN');});
+                }
+                rows.forEach(function(row){tbody.appendChild(row);});
+            });
+        });
+    });
+});
+</script>
+{% block scripts %}{% endblock %}
+</body>
+</html>

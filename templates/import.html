@@ -1,0 +1,71 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <h5 class="page-title mb-0"><i class="fas fa-file-import" style="color:#007aff;margin-right:8px"></i> 数据导入</h5>
+</div>
+
+<div class="alert alert-light border" style="border-radius:12px;font-size:13px;color:#515154">
+    <i class="fas fa-info-circle" style="color:#007aff"></i>
+    选择学校教务处的 Excel 文件，<strong>上传后系统自动识别并导入</strong>到当前学期：
+    <div class="mt-2">
+        <span class="badge text-bg-primary me-1">班级课程计划表</span> → 班级 + 教师 + 课程 + 教学任务
+        <span class="badge text-bg-success me-1">教师课程计划表</span> → 教师名单补充
+        <span class="badge text-bg-warning me-1">班级课程表</span> → 班级课表（覆盖现有课表）
+        <span class="badge text-bg-secondary me-1">教师课程表</span> → 仅供核对（不导入）
+    </div>
+    <div class="mt-1">可一次选择多个文件；按名称去重，重复上传不会产生重复数据。</div>
+</div>
+
+<!-- 上传区 -->
+<div class="card mb-3">
+    <div class="card-header"><i class="fas fa-upload"></i> 上传文件，一键导入</div>
+    <div class="card-body">
+        <form method="post" action="/import/do" enctype="multipart/form-data">
+            <div class="d-flex gap-2 flex-wrap align-items-center">
+                <input type="file" name="files" class="form-control form-control-sm" style="max-width:480px"
+                       accept=".xlsx,.xls" multiple required>
+                <button class="btn btn-primary btn-sm"><i class="fas fa-bolt"></i> 上传并自动导入</button>
+            </div>
+            <div class="small text-muted mt-2">上传后立即解析并写入当前学期，页面会显示导入结果</div>
+        </form>
+    </div>
+</div>
+
+{% if result %}
+<!-- 导入结果 -->
+<div class="card">
+    <div class="card-header"><i class="fas fa-check-circle" style="color:#34c759"></i> 本次导入结果</div>
+    <div class="card-body">
+        <div class="row g-3 mb-3">
+            <div class="col-6 col-md-2">
+                <div class="card stat-card text-center h-100"><div class="number" style="color:#007aff">{{ result.classes }}</div><div class="label">班级</div></div>
+            </div>
+            <div class="col-6 col-md-2">
+                <div class="card stat-card text-center h-100"><div class="number" style="color:#34c759">{{ result.teachers }}</div><div class="label">教师</div></div>
+            </div>
+            <div class="col-6 col-md-2">
+                <div class="card stat-card text-center h-100"><div class="number" style="color:#ff9500">{{ result.courses }}</div><div class="label">课程</div></div>
+            </div>
+            <div class="col-6 col-md-2">
+                <div class="card stat-card text-center h-100"><div class="number" style="color:#af52de">{{ result.tasks }}</div><div class="label">教学任务</div></div>
+            </div>
+            <div class="col-6 col-md-2">
+                <div class="card stat-card text-center h-100"><div class="number" style="color:#007aff">{{ result.cells }}</div><div class="label">课表格子</div></div>
+            </div>
+        </div>
+        {% if result.notes %}
+        <div class="alert alert-warning" style="border-radius:10px;font-size:13px;padding:10px 14px">
+            <i class="fas fa-exclamation-triangle"></i> 需要留意：
+            <ul class="mb-0 mt-1" style="padding-left:18px">
+                {% for n in result.notes %}<li>{{ n }}</li>{% endfor %}
+            </ul>
+        </div>
+        {% endif %}
+        <div class="small text-muted">
+            已自动导入到当前学期。可到「班级管理 / 教师管理 / 课程管理 / 排课管理」查看；
+            教师职务与学科类别默认「专任教师 / 专业课」，请按实际到教师管理调整。
+        </div>
+    </div>
+</div>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,96 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-2 flex-wrap gap-2">
+    <h5 class="page-title mb-0" style="font-size:17px"><i class="fas fa-coins" style="color:#34c759;margin-right:8px"></i> 补助发放</h5>
+    <div class="d-flex gap-2 align-items-center">
+        <div class="btn-group btn-group-sm">
+            {% for p in period_nos %}
+            <a class="btn {% if p == cur %}btn-primary{% else %}btn-outline-secondary{% endif %}" href="/payments?period={{ p }}">第{{ p }}周期</a>
+            {% endfor %}
+        </div>
+        <a href="/payments/export?period={{ cur }}" class="btn btn-sm btn-success"><i class="fas fa-file-excel"></i> 导出表格</a>
+    </div>
+</div>
+
+<div class="alert alert-light border p-2 mb-2" style="border-radius:10px;font-size:12px;color:#515154">
+    <i class="fas fa-info-circle" style="color:#007aff"></i>
+    每 <strong>4 周</strong> 发放一次（第 {{ cur }} 周期：{{ period_range_str }}）。点「读取」自动从各项目汇总，
+    金额可直接修改后「保存」；出卷/监考无数据源，手动添加。导出的 Excel 中<strong>夜自习单独一张表</strong>，其他项目一张表。
+</div>
+
+<form method="post" action="/payments/save">
+    <input type="hidden" name="period" value="{{ cur }}">
+    <div class="row g-3">
+        {% for cat in categories %}
+        <div class="col-lg-6">
+            <div class="card h-100">
+                <div class="card-header d-flex justify-content-between align-items-center" style="padding:8px 14px;font-size:14px">
+                    <span>
+                        {% if cat == '夜自习' %}<i class="fas fa-moon" style="color:#af52de"></i>
+                        {% elif cat == '调课' %}<i class="fas fa-exchange-alt" style="color:#007aff"></i>
+                        {% elif cat == '超课时' %}<i class="fas fa-chart-bar" style="color:#ff9500"></i>
+                        {% elif cat == '管理' %}<i class="fas fa-user-tie" style="color:#5856d6"></i>
+                        {% elif cat == '出卷' %}<i class="fas fa-file-alt" style="color:#ff3b30"></i>
+                        {% else %}<i class="fas fa-clipboard-check" style="color:#34c759"></i>{% endif %}
+                        {{ cat }}
+                        {% if source_data.get(cat) %}<span class="badge text-bg-light border" style="font-size:10px">{{ source_data[cat]|length }} 条可读取</span>{% endif %}
+                    </span>
+                    <div class="d-flex gap-1">
+                        <button type="submit" formaction="/payments/read" name="category" value="{{ cat }}" class="btn btn-sm btn-outline-primary" style="padding:0 8px;font-size:12px"><i class="fas fa-sync"></i> 读取</button>
+                        <button type="button" class="btn btn-sm btn-outline-secondary" style="padding:0 8px;font-size:12px" onclick="document.getElementById('addCat').value='{{ cat }}'; new bootstrap.Modal(document.getElementById('addModal')).show()"><i class="fas fa-plus"></i></button>
+                    </div>
+                </div>
+                <div class="table-responsive">
+                    <table class="table table-sm mb-0" style="font-size:13px">
+                        <thead><tr><th>教师</th><th style="width:110px">金额(元)</th><th style="width:50px">来源</th><th style="width:40px"></th></tr></thead>
+                        <tbody>
+                            {% for (c, tid), rec in grid.items() if c == cat %}
+                            <tr>
+                                <td>{{ teacher_name(tid) }}</td>
+                                <td><input type="number" step="0.01" class="form-control form-control-sm" name="amt_{{ cat }}_{{ tid }}" value="{{ '%.2f'|format(rec.amount) }}" style="padding:1px 6px"></td>
+                                <td>{% if rec.source == 'auto' %}<span class="badge text-bg-light border" style="font-size:10px">自动</span>{% else %}<span class="badge text-bg-warning" style="font-size:10px">手动</span>{% endif %}</td>
+                                <td><button type="button" class="btn btn-sm btn-outline-danger" style="padding:0 5px;font-size:11px"
+                                            onclick="postDelete('/payments/{{ rec.id }}/delete?period={{ cur }}', '删除这笔补助？')">×</button></td>
+                            </tr>
+                            {% else %}
+                            <tr><td colspan="4" class="text-center text-muted py-3" style="font-size:12px">
+                                {% if cat in ('出卷', '监考') %}手动添加{% else %}点「读取」从{{ '夜自习统计' if cat == '夜自习' else cat + '模块' }}汇总{% endif %}
+                            </td></tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+    <div class="mt-3 text-end">
+        <button class="btn btn-primary"><i class="fas fa-save"></i> 保存本周期发放</button>
+    </div>
+</form>
+
+<!-- 手动添加 -->
+<div class="modal fade" id="addModal" tabindex="-1">
+    <div class="modal-dialog modal-sm">
+        <form class="modal-content" method="post" action="/payments/add">
+            <input type="hidden" name="period" value="{{ cur }}">
+            <input type="hidden" name="category" id="addCat">
+            <div class="modal-header"><h6 class="modal-title">手动添加补助</h6><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+            <div class="modal-body">
+                <div class="mb-2"><label class="form-label">教师</label>
+                    <select name="teacher_id" class="form-select form-select-sm" required>
+                        {% for t in teachers %}<option value="{{ t.id }}">{{ t.name }}</option>{% endfor %}
+                    </select>
+                </div>
+                <div class="mb-2"><label class="form-label">金额(元)</label>
+                    <input type="number" step="0.01" name="amount" class="form-control form-control-sm" placeholder="如：100" required>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-sm btn-secondary" data-bs-dismiss="modal">取消</button>
+                <button type="submit" class="btn btn-sm btn-primary">添加</button>
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}

@@ -1,0 +1,200 @@
+{% extends "base.html" %}
+{% block content %}
+<style>
+.sched-grid { width:100%; border-collapse:separate; border-spacing:6px; table-layout:fixed; }
+.sched-grid th, .sched-grid td { border-radius:10px; }
+.sched-grid th { background:rgba(0,122,255,0.08); color:#0066d6; font-size:12px; font-weight:600; padding:8px 4px; text-align:center; }
+.sched-grid td { padding:0; vertical-align:top; }
+.sched-grid td.empty-cell { background:rgba(0,0,0,0.02); }
+.sched-grid .cell {
+    min-height:64px; padding:8px; border-radius:10px; cursor:pointer;
+    display:flex; flex-direction:column; justify-content:center; align-items:center;
+    transition: transform .15s ease, box-shadow .15s ease;
+}
+.sched-grid .cell:hover { transform:translateY(-1px); box-shadow:0 4px 12px rgba(0,0,0,0.10); }
+.cell .c-name { font-weight:700; font-size:13px; color:#1d1d1f; text-align:center; line-height:1.3; }
+.cell .c-meta { font-size:10.5px; color:#515154; text-align:center; margin-top:3px; line-height:1.4; }
+.cell .c-tag { font-size:9px; padding:1px 5px; border-radius:6px; background:rgba(255,255,255,0.75); color:#86868b; margin-top:2px; }
+.period-col { width:56px; text-align:center; color:#86868b; font-size:11px; }
+</style>
+
+<div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+    <h5 class="page-title mb-0"><i class="fas fa-table" style="color:#007aff;margin-right:8px"></i> 班级课表</h5>
+    <div class="d-flex gap-2">
+        {% if current_user and current_user.role == 'admin' %}
+        <form method="post" action="/schedule/clear" onsubmit="return confirm('确定清空当前学期全部课表？')">
+            <button class="btn btn-outline-danger btn-sm"><i class="fas fa-eraser"></i> 清空课表</button>
+        </form>
+        {% endif %}
+    </div>
+</div>
+
+<div class="mb-3">
+    <div class="btn-group btn-group-sm flex-wrap" role="group">
+        {% for c in classes %}
+        <a href="/schedule?class_id={{ c.id }}" class="btn {% if c.id == cid %}btn-primary{% else %}btn-outline-secondary{% endif %}">{{ c.name }}</a>
+        {% endfor %}
+        {% if not classes %}<span class="text-muted small">请先在「基础数据 → 班级管理」添加班级</span>{% endif %}
+    </div>
+</div>
+
+{% if grid %}
+<div class="card">
+    <div class="table-responsive">
+        <table class="sched-grid">
+            <thead>
+                <tr>
+                    <th class="period-col">节次</th>
+                    {% for w in wds %}<th>{{ weekday_label(w) }}</th>{% endfor %}
+                </tr>
+            </thead>
+            <tbody>
+                {% set palette = ['#e8f0fe','#e6f4ea','#fef7e0','#f3e8fd','#fde8e8','#e0f7fa','#fff0e0','#e8f8f0','#eef0f8','#f9f3e0'] %}
+                {% for p in periods %}
+                <tr>
+                    <td class="period-col">第{{ p }}节</td>
+                    {% for w in wds %}
+                    {% set cell = grid[p - 1][w - 1] %}
+                    <td class="{% if not cell %}empty-cell{% endif %}">
+                        {% if cell %}
+                        {% set ci = cell.course_id % palette|length %}
+                        <div class="cell" style="background:{{ palette[ci] }}" onclick="openCellModal({{ cell.id }}, {{ cell.course_id }}, {{ cell.teacher_id }}, {{ cell.classroom_id or 0 }}, {{ cell.weekday }}, {{ cell.period }}, '{{ cell.week_type }}')">
+                            <div class="c-name">{{ course_name(cell.course_id) }}</div>
+                            <div class="c-meta">{{ teacher_name(cell.teacher_id) }}{% if cell.classroom_id %} · {{ classroom_name(cell.classroom_id) }}{% endif %}</div>
+                            {% if cell.week_type != 'every' %}<div class="c-tag">{{ '单周' if cell.week_type == 'odd' else '双周' }}</div>{% endif %}
+                        </div>
+                        {% endif %}
+                    </td>
+                    {% endfor %}
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% else %}
+<div class="card"><div class="card-body text-center py-5 text-muted">
+    <i class="fas fa-calendar-times" style="font-size:36px;color:#c7c7cc"></i>
+    <p class="mt-3 mb-1">当前学期还没有课表数据</p>
+    <p style="font-size:13px">课表以教务处上传为准：「基础数据 → 数据导入」上传班级课程表后回到本页查看；本页可手动调整（拖格子/换教室/删除）</p>
+</div></div>
+{% endif %}
+
+{% if current_user and current_user.role == 'admin' %}
+<!-- 格子编辑 Modal -->
+<div class="modal fade" id="cellModal" tabindex="-1">
+    <div class="modal-dialog modal-sm">
+        <div class="modal-content">
+            <div class="modal-header"><h6 class="modal-title">调整课表格子</h6><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+            <div class="modal-body">
+                <input type="hidden" id="cellId">
+                <div class="mb-2"><label class="form-label">课程</label>
+                    <select id="cellCourse" class="form-select form-select-sm">
+                        {% for c in courses %}<option value="{{ c.id }}">{{ c.name }}</option>{% endfor %}
+                    </select>
+                </div>
+                <div class="mb-2"><label class="form-label">教师</label>
+                    <select id="cellTeacher" class="form-select form-select-sm">
+                        {% for t in teachers %}<option value="{{ t.id }}">{{ t.name }}</option>{% endfor %}
+                    </select>
+                </div>
+                <div class="mb-2"><label class="form-label">教室（选空=不指定）</label>
+                    <select id="cellRoom" class="form-select form-select-sm">
+                        <option value="">— 不指定 —</option>
+                        {% for c in classrooms %}<option value="{{ c.id }}">{{ c.name }}</option>{% endfor %}
+                    </select>
+                </div>
+                <div class="mb-2"><label class="form-label">周类型</label>
+                    <select id="cellWeekType" class="form-select form-select-sm">
+                        <option value="every">每周</option><option value="odd">单周</option><option value="even">双周</option>
+                    </select>
+                </div>
+                <div class="mb-2"><label class="form-label">移动到（周几 / 第几节）</label>
+                    <div class="d-flex gap-2">
+                        <select id="cellWeekday" class="form-select form-select-sm">
+                            {% for w in wds %}<option value="{{ w }}">{{ weekday_label(w) }}</option>{% endfor %}
+                        </select>
+                        <select id="cellPeriod" class="form-select form-select-sm">
+                            {% for p in periods %}<option value="{{ p }}">第{{ p }}节</option>{% endfor %}
+                        </select>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer d-flex justify-content-between">
+                <button class="btn btn-outline-danger btn-sm" onclick="cellDelete()"><i class="fas fa-trash"></i> 删除该节</button>
+                <div>
+                    <button type="button" class="btn btn-sm btn-secondary" data-bs-dismiss="modal">取消</button>
+                    <button class="btn btn-sm btn-primary" onclick="cellMove()"><i class="fas fa-arrows-alt"></i> 移动</button>
+                    <button class="btn btn-sm btn-success" onclick="cellSave()"><i class="fas fa-save"></i> 保存修改</button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+{% if current_user and current_user.role == 'admin' %}
+<script>
+var cellModal = null;
+function openCellModal(cid, courseId, teacherId, roomId, weekday, period, weekType) {
+    document.getElementById('cellId').value = cid;
+    document.getElementById('cellCourse').value = courseId;
+    document.getElementById('cellTeacher').value = teacherId;
+    document.getElementById('cellRoom').value = roomId || '';
+    document.getElementById('cellWeekType').value = weekType;
+    document.getElementById('cellWeekday').value = weekday;
+    document.getElementById('cellPeriod').value = period;
+    if (!cellModal) cellModal = new bootstrap.Modal(document.getElementById('cellModal'));
+    cellModal.show();
+}
+function showToast(msg, type) {
+    var t = document.createElement('div');
+    t.style.cssText = 'position:fixed;top:20px;left:50%;transform:translateX(-50%);z-index:99999;padding:10px 20px;border-radius:10px;color:#fff;font-size:14px;box-shadow:0 4px 16px rgba(0,0,0,0.25);';
+    t.style.background = (type === 'danger') ? '#ff3b30' : '#34c759';
+    t.textContent = msg;
+    document.body.appendChild(t);
+    setTimeout(function(){ t.remove(); }, 2500);
+}
+function cellPost(data, cb) {
+    fetch('/schedule/cell/update', {method:'POST', headers:{'Content-Type':'application/x-www-form-urlencoded','X-CSRF-Token':cmCsrfToken()}, body:new URLSearchParams(data)})
+        .then(function(r){return r.json();})
+        .then(function(j){
+            if (j.ok) {
+                showToast('修改成功：' + (j.msg || '已保存'), 'success');
+                setTimeout(function(){ location.reload(); }, 900);
+            } else {
+                showToast(j.error || '操作失败', 'danger');
+                setTimeout(function(){ location.reload(); }, 1600);
+            }
+        })
+        .catch(function(){ showToast('网络错误，已恢复原状', 'danger'); setTimeout(function(){ location.reload(); }, 1600); });
+}
+function cellSave() {
+    cellPost({
+        cell_id: document.getElementById('cellId').value,
+        action: 'update',
+        course_id: document.getElementById('cellCourse').value,
+        teacher_id: document.getElementById('cellTeacher').value,
+        classroom_id: document.getElementById('cellRoom').value,
+        week_type: document.getElementById('cellWeekType').value
+    });
+}
+function cellMove() {
+    cellPost({
+        cell_id: document.getElementById('cellId').value,
+        action: 'move',
+        weekday: document.getElementById('cellWeekday').value,
+        period: document.getElementById('cellPeriod').value,
+        classroom_id: document.getElementById('cellRoom').value,
+        week_type: document.getElementById('cellWeekType').value
+    });
+}
+function cellDelete() {
+    if (!confirm('确定删除这节课？')) return;
+    cellPost({cell_id: document.getElementById('cellId').value, action: 'delete'});
+}
+</script>
+{% endif %}
+{% endblock %}

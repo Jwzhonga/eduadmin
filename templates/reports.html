@@ -1,0 +1,116 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <h5 class="page-title mb-0"><i class="fas fa-file-invoice-dollar" style="color:#007aff;margin-right:8px"></i> 报表中心</h5>
+    <a href="/reports/export" class="btn btn-success btn-sm"><i class="fas fa-file-excel"></i> 导出综合报表</a>
+</div>
+
+<!-- 导出中心 -->
+<div class="card mb-3">
+    <div class="card-header" style="padding:12px 16px"><i class="fas fa-download" style="color:#007aff;margin-right:6px"></i> 导出中心（Excel）</div>
+    <div class="card-body p-2">
+        <div class="row g-2">
+            {% set exports = [
+                ('/reports/export', 'fas fa-file-invoice-dollar', '综合报表', '超课时+看课+夜自习+加班+管理费 汇总（含明细表）', '#007aff'),
+                ('/books/stats/export', 'fas fa-book', '教材发放统计', '按教材/班级统计发放数量与金额', '#34c759'),
+                ('/workload/export', 'fas fa-chart-line', '超课时统计', '每位教师周课时/超课时/补助明细', '#ff9500'),
+                ('/reports/export/night', 'fas fa-moon', '夜自习统计', '每位教师夜自习节数与补贴', '#af52de'),
+                ('/reports/export/overtimes', 'fas fa-clock', '加班明细', '加班日期/教师/时长/金额', '#5856d6'),
+                ('/reports/export/fees', 'fas fa-coins', '管理费明细', '按月/教师的管理费发放记录', '#00c7be'),
+            ] %}
+            {% for url, icon, name, desc, color in exports %}
+            <div class="col-md-6 col-xl-4">
+                <div class="d-flex align-items-center gap-2 border rounded p-2" style="height:100%">
+                    <i class="fas {{ icon }}" style="color:{{ color }};font-size:20px;width:28px"></i>
+                    <div style="flex:1">
+                        <div style="font-weight:600;font-size:13px">{{ name }}</div>
+                        <div class="text-muted" style="font-size:11px">{{ desc }}</div>
+                    </div>
+                    <a href="{{ url }}" class="btn btn-sm btn-outline-success"><i class="fas fa-file-excel"></i> 导出</a>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+</div>
+
+<div class="row g-3 mb-3">
+    <div class="col-6 col-md-3">
+        <div class="card stat-card text-center h-100">
+            <div class="number" style="color:#007aff">{{ rows|length }}</div>
+            <div class="label">涉及教师</div>
+        </div>
+    </div>
+    <div class="col-6 col-md-3">
+        <div class="card stat-card text-center h-100">
+            <div class="number" style="color:#ff9500">{{ unit }} 元/节</div>
+            <div class="label">超课时单价</div>
+        </div>
+    </div>
+    <div class="col-6 col-md-3">
+        <div class="card stat-card text-center h-100">
+            <div class="number" style="color:#34c759">{{ watch_unit }} 元/节</div>
+            <div class="label">看课补助单价</div>
+        </div>
+    </div>
+    <div class="col-6 col-md-3">
+        <div class="card stat-card text-center h-100">
+            <div class="number" style="color:#af52de">¥{{ '%.2f'|format(grand_total) }}</div>
+            <div class="label">补助总额</div>
+        </div>
+    </div>
+</div>
+
+<div class="card">
+    <div class="table-responsive">
+        <table class="table table-hover table-sm table-sortable" id="reportsTable">
+            <thead>
+                <tr>
+                    <th style="width:50px">#</th>
+                    <th>教师</th>
+                    <th>超课时费(元)</th>
+                    <th>看课补助(元)</th>
+                    <th>夜自习补贴(元)</th>
+                    <th>加班费(元)</th>
+                    <th>管理费(元)</th>
+                    <th>合计(元)</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for r in rows %}
+                <tr>
+                    <td>{{ loop.index }}</td>
+                    <td>{{ r.name }}</td>
+                    <td>{{ '%.2f'|format(r.extra) }}</td>
+                    <td>{{ '%.2f'|format(r.watch) }}</td>
+                    <td>{{ '%.2f'|format(r.night) }}</td>
+                    <td>{{ '%.2f'|format(r.overtime) }}</td>
+                    <td>{{ '%.2f'|format(r.fee) }}</td>
+                    <td><strong>{{ '%.2f'|format(r.total) }}</strong></td>
+                </tr>
+                {% else %}
+                <tr><td colspan="8" class="text-center text-muted py-4">暂无数据</td></tr>
+                {% endfor %}
+            </tbody>
+            {% if rows %}
+            <tfoot>
+                <tr style="background:#f5f5f7">
+                    <td colspan="2"><strong>合计</strong></td>
+                    <td><strong>{{ '%.2f'|format(rows|sum(attribute='extra')) }}</strong></td>
+                    <td><strong>{{ '%.2f'|format(rows|sum(attribute='watch')) }}</strong></td>
+                    <td><strong>{{ '%.2f'|format(rows|sum(attribute='night')) }}</strong></td>
+                    <td><strong>{{ '%.2f'|format(rows|sum(attribute='overtime')) }}</strong></td>
+                    <td><strong>{{ '%.2f'|format(rows|sum(attribute='fee')) }}</strong></td>
+                    <td><strong style="color:#007aff">{{ '%.2f'|format(grand_total) }}</strong></td>
+                </tr>
+            </tfoot>
+            {% endif %}
+        </table>
+    </div>
+</div>
+
+<div class="alert alert-light border mt-3" style="border-radius:12px;font-size:13px;color:#515154">
+    <i class="fas fa-info-circle" style="color:#007aff"></i>
+    导出文件包含 4 个工作表：补助汇总、超课时明细、看课记录、夜自习明细。单价在「系统设置」中调整，标准在「课时标准」中调整。
+</div>
+{% endblock %}

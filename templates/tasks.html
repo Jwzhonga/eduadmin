@@ -1,0 +1,171 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <h5 class="page-title mb-0"><i class="fas fa-tasks" style="color:#007aff;margin-right:8px"></i> 教学任务</h5>
+    {% if current_user and current_user.role == 'admin' %}
+    <button class="btn btn-primary btn-sm" data-bs-toggle="modal" data-bs-target="#addModal"><i class="fas fa-plus"></i> 添加任务</button>
+    {% endif %}
+</div>
+
+{% if current_user and current_user.role == 'admin' %}
+<div class="alert alert-light border d-flex justify-content-between align-items-center" style="border-radius:12px">
+    <div style="font-size:13px;color:#515154">
+        <i class="fas fa-info-circle" style="color:#007aff"></i> 教学任务管理班级→课程→教师对应关系；课表以教务处上传的 Excel 为准（「基础数据 → 数据导入」），也可手动调整。支持合班（一个教师同时给多个班上课）、单双周、指定实训教室。
+    </div>
+    <a href="/schedule" class="btn btn-primary btn-sm ms-2">去排课 →</a>
+</div>
+{% endif %}
+
+<div class="card">
+    <div class="table-responsive">
+        <table class="table table-hover table-sm table-sortable" id="tasksTable">
+            <thead>
+                <tr>
+                    <th style="width:60px">#</th>
+                    <th>班级</th>
+                    <th>课程</th>
+                    <th>教师</th>
+                    <th>周课时</th>
+                    <th>周类型</th>
+                    <th>教室</th>
+                    <th>备注</th>
+                    {% if current_user and current_user.role == 'admin' %}<th style="width:120px" data-no-sort>操作</th>{% endif %}
+                </tr>
+            </thead>
+            <tbody>
+                {% for r in rows %}
+                <tr>
+                    <td>{{ loop.index }}</td>
+                    <td>
+                        {% set ids = r.class_ids|from_json %}
+                        {% for c in classes %}{% if c.id in ids %}<span class="badge text-bg-light border me-1">{{ c.name }}</span>{% endif %}{% endfor %}
+                    </td>
+                    <td>{% for c in courses %}{% if c.id == r.course_id %}{{ c.name }}{% endif %}{% endfor %}</td>
+                    <td>{% for t in teachers %}{% if t.id == r.teacher_id %}{{ t.name }}{% endif %}{% endfor %}</td>
+                    <td>{{ r.weekly_hours }}</td>
+                    <td>
+                        {% if r.week_type == 'every' %}<span class="badge text-bg-primary">每周</span>
+                        {% elif r.week_type == 'odd' %}<span class="badge text-bg-warning">单周</span>
+                        {% else %}<span class="badge text-bg-info">双周</span>{% endif %}
+                    </td>
+                    <td>{% for c in classrooms %}{% if c.id == r.classroom_id %}{{ c.name }}{% endif %}{% endfor %}{% if not r.classroom_id %}自动{% endif %}</td>
+                    <td>{{ r.remark }}</td>
+                    {% if current_user and current_user.role == 'admin' %}
+                    <td>
+                        <button class="btn btn-sm btn-outline-primary" data-bs-toggle="modal" data-bs-target="#editModal{{ r.id }}"><i class="fas fa-edit"></i></button>
+                        <button class="btn btn-sm btn-outline-danger" onclick="postDelete('/tasks/{{ r.id }}/delete','确定删除该教学任务？关联课表格子将一并删除')"><i class="fas fa-trash"></i></button>
+                    </td>
+                    {% endif %}
+                </tr>
+                {% if current_user and current_user.role == 'admin' %}
+                <div class="modal fade" id="editModal{{ r.id }}" tabindex="-1">
+                    <div class="modal-dialog modal-sm">
+                        <form class="modal-content" method="post" action="/tasks/{{ r.id }}/edit">
+                            <div class="modal-header"><h6 class="modal-title">编辑教学任务</h6><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+                            <div class="modal-body">
+                                <div class="mb-2"><label class="form-label">班级（可多选=合班）</label>
+                                    <div style="max-height:140px;overflow-y:auto;border:1px solid #eee;border-radius:8px;padding:8px">
+                                        {% set ids = r.class_ids|from_json %}
+                                        {% for c in classes %}
+                                        <div class="form-check">
+                                            <input class="form-check-input" type="checkbox" name="class_ids" value="{{ c.id }}" id="ec{{ r.id }}_{{ c.id }}" {% if c.id in ids %}checked{% endif %}>
+                                            <label class="form-check-label" for="ec{{ r.id }}_{{ c.id }}" style="font-size:12px">{{ c.name }}</label>
+                                        </div>
+                                        {% endfor %}
+                                    </div>
+                                </div>
+                                <div class="mb-2"><label class="form-label">课程</label>
+                                    <select class="form-select form-select-sm" name="course_id">
+                                        {% for c in courses %}<option value="{{ c.id }}" {% if c.id == r.course_id %}selected{% endif %}>{{ c.name }}</option>{% endfor %}
+                                    </select>
+                                </div>
+                                <div class="mb-2"><label class="form-label">教师</label>
+                                    <select class="form-select form-select-sm" name="teacher_id">
+                                        {% for t in teachers %}<option value="{{ t.id }}" {% if t.id == r.teacher_id %}selected{% endif %}>{{ t.name }}</option>{% endfor %}
+                                    </select>
+                                </div>
+                                <div class="mb-2"><label class="form-label">周课时</label><input type="number" class="form-control form-control-sm" name="weekly_hours" value="{{ r.weekly_hours }}" min="1"></div>
+                                <div class="mb-2"><label class="form-label">周类型</label>
+                                    <select class="form-select form-select-sm" name="week_type">
+                                        <option value="every" {% if r.week_type == 'every' %}selected{% endif %}>每周</option>
+                                        <option value="odd" {% if r.week_type == 'odd' %}selected{% endif %}>单周</option>
+                                        <option value="even" {% if r.week_type == 'even' %}selected{% endif %}>双周</option>
+                                    </select>
+                                </div>
+                                <div class="mb-2"><label class="form-label">教室（留空=自动分配）</label>
+                                    <select class="form-select form-select-sm" name="classroom_id">
+                                        <option value="">自动分配</option>
+                                        {% for c in classrooms %}<option value="{{ c.id }}" {% if c.id == r.classroom_id %}selected{% endif %}>{{ c.name }}</option>{% endfor %}
+                                    </select>
+                                </div>
+                                <div class="mb-2"><label class="form-label">备注</label><input class="form-control form-control-sm" name="remark" value="{{ r.remark }}"></div>
+                            </div>
+                            <div class="modal-footer">
+                                <button type="button" class="btn btn-sm btn-secondary" data-bs-dismiss="modal">取消</button>
+                                <button type="submit" class="btn btn-sm btn-primary">保存</button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+                {% endif %}
+                {% else %}
+                <tr><td colspan="9" class="text-center text-muted py-4">暂无教学任务，点击右上角「添加任务」开始</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+{% if current_user and current_user.role == 'admin' %}
+<div class="modal fade" id="addModal" tabindex="-1">
+    <div class="modal-dialog modal-sm">
+        <form class="modal-content" method="post" action="/tasks/add">
+            <div class="modal-header"><h6 class="modal-title">添加教学任务</h6><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+            <div class="modal-body">
+                <div class="mb-2"><label class="form-label">班级（可多选=合班）</label>
+                    <div style="max-height:150px;overflow-y:auto;border:1px solid #eee;border-radius:8px;padding:8px">
+                        {% for c in classes %}
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" name="class_ids" value="{{ c.id }}" id="nc{{ c.id }}">
+                            <label class="form-check-label" for="nc{{ c.id }}" style="font-size:12px">{{ c.name }}</label>
+                        </div>
+                        {% endfor %}
+                    </div>
+                </div>
+                <div class="mb-2"><label class="form-label">课程</label>
+                    <select class="form-select form-select-sm" name="course_id" required>
+                        <option value="">— 请选择 —</option>
+                        {% for c in courses %}<option value="{{ c.id }}">{{ c.name }}（{{ c.category }}）</option>{% endfor %}
+                    </select>
+                </div>
+                <div class="mb-2"><label class="form-label">教师</label>
+                    <select class="form-select form-select-sm" name="teacher_id" required>
+                        <option value="">— 请选择 —</option>
+                        {% for t in teachers %}<option value="{{ t.id }}">{{ t.name }}</option>{% endfor %}
+                    </select>
+                </div>
+                <div class="mb-2"><label class="form-label">周课时</label><input type="number" class="form-control form-control-sm" name="weekly_hours" value="2" min="1"></div>
+                <div class="mb-2"><label class="form-label">周类型</label>
+                    <select class="form-select form-select-sm" name="week_type">
+                        <option value="every">每周</option>
+                        <option value="odd">单周</option>
+                        <option value="even">双周</option>
+                    </select>
+                </div>
+                <div class="mb-2"><label class="form-label">教室（实训课建议指定实训室）</label>
+                    <select class="form-select form-select-sm" name="classroom_id">
+                        <option value="">自动分配</option>
+                        {% for c in classrooms %}<option value="{{ c.id }}">{{ c.name }}（{{ c.ctype }}）</option>{% endfor %}
+                    </select>
+                </div>
+                <div class="mb-2"><label class="form-label">备注</label><input class="form-control form-control-sm" name="remark"></div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-sm btn-secondary" data-bs-dismiss="modal">取消</button>
+                <button type="submit" class="btn btn-sm btn-primary">保存</button>
+            </div>
+        </form>
+    </div>
+</div>
+{% endif %}
+{% endblock %}

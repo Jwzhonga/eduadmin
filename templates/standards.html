@@ -1,0 +1,135 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <h5 class="page-title mb-0"><i class="fas fa-balance-scale" style="color:#007aff;margin-right:8px"></i> 课时标准配置</h5>
+</div>
+
+<div class="row g-3">
+    <div class="col-lg-6">
+        <div class="card">
+            <div class="card-header"><i class="fas fa-user-tie"></i> 职务标准课时（周标准）</div>
+            <div class="table-responsive">
+                <table class="table table-hover table-sm table-sortable" id="posTable">
+                    <thead><tr><th>#</th><th>职务</th><th>周标准课时</th><th>备注</th>{% if current_user.role == 'admin' %}<th style="width:120px" data-no-sort>操作</th>{% endif %}</tr></thead>
+                    <tbody>
+                        {% for p in positions %}
+                        <tr>
+                            <td>{{ loop.index }}</td>
+                            <td>{{ p.position }}</td>
+                            <td>{{ p.weekly_std_hours }}</td>
+                            <td>{{ p.note }}</td>
+                            {% if current_user.role == 'admin' %}
+                            <td>
+                                <button class="btn btn-sm btn-outline-primary" data-bs-toggle="modal" data-bs-target="#posEdit{{ p.id }}"><i class="fas fa-edit"></i></button>
+                                <button class="btn btn-sm btn-outline-danger" onclick="postDelete('/standards/position/{{ p.id }}/delete', {{ p.position|tojson|forceescape }})"><i class="fas fa-trash"></i></button>
+                            </td>
+                            {% endif %}
+                        </tr>
+                        {% else %}
+                        <tr><td colspan="5" class="text-center text-muted py-4">暂无职务标准</td></tr>
+                        {% endfor %}
+                    </tbody>
+                        </table>
+        {% if current_user.role == 'admin' %}
+        {% for p in positions %}
+        <div class="modal fade" id="posEdit{{ p.id }}" tabindex="-1">
+            <div class="modal-dialog modal-sm">
+                <form class="modal-content" method="post" action="/standards/position/{{ p.id }}/edit">
+                    <div class="modal-header"><h6 class="modal-title">编辑「{{ p.position }}」</h6><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+                    <div class="modal-body">
+                        <div class="mb-2"><label class="form-label">周标准课时</label><input type="number" step="0.5" class="form-control form-control-sm" name="weekly_std_hours" value="{{ p.weekly_std_hours }}"></div>
+                        <div class="mb-2"><label class="form-label">备注</label><input class="form-control form-control-sm" name="note" value="{{ p.note }}"></div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-sm btn-secondary" data-bs-dismiss="modal">取消</button>
+                        <button type="submit" class="btn btn-sm btn-primary">保存</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+        {% endfor %}
+        {% endif %}
+        </div>
+    </div>
+
+    <div class="col-lg-6">
+            </div>
+            {% if current_user.role == 'admin' %}
+            <div class="card-body border-top pt-3">
+                <form method="post" action="/standards/position/add" class="row g-2 align-items-end">
+                    <div class="col-4"><label class="form-label" style="font-size:12px">新职务</label><input class="form-control form-control-sm" name="position" placeholder="如：实训管理员" required></div>
+                    <div class="col-4"><label class="form-label" style="font-size:12px">周标准课时</label><input type="number" step="0.5" class="form-control form-control-sm" name="weekly_std_hours" value="10"></div>
+                    <div class="col-4"><label class="form-label" style="font-size:12px">备注</label><input class="form-control form-control-sm" name="note"></div>
+                    <div class="col-12"><button class="btn btn-sm btn-primary"><i class="fas fa-plus"></i> 添加职务标准</button></div>
+                </form>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+
+    <div class="col-lg-6">
+        <div class="card">
+            <div class="card-header"><i class="fas fa-percentage"></i> 学科类别课时系数</div>
+            <div class="table-responsive">
+                <table class="table table-hover table-sm table-sortable" id="coefTable">
+                    <thead><tr><th>#</th><th>学科类别</th><th>系数</th><th>备注</th>{% if current_user.role == 'admin' %}<th style="width:120px" data-no-sort>操作</th>{% endif %}</tr></thead>
+                    <tbody>
+                        {% for c in coefs %}
+                        <tr>
+                            <td>{{ loop.index }}</td>
+                            <td>{{ c.category }}</td>
+                            <td>{{ c.coefficient }}</td>
+                            <td>{{ c.note }}</td>
+                            {% if current_user.role == 'admin' %}
+                            <td>
+                                <button class="btn btn-sm btn-outline-primary" data-bs-toggle="modal" data-bs-target="#coefEdit{{ c.id }}"><i class="fas fa-edit"></i></button>
+                                <button class="btn btn-sm btn-outline-danger" onclick="postDelete('/standards/coef/{{ c.id }}/delete', {{ c.category|tojson|forceescape }})"><i class="fas fa-trash"></i></button>
+                            </td>
+                            {% endif %}
+                        </tr>
+                        {% else %}
+                        <tr><td colspan="5" class="text-center text-muted py-4">暂无学科系数</td></tr>
+                        {% endfor %}
+                    </tbody>
+                        </table>
+        {% if current_user.role == 'admin' %}
+        {% for c in coefs %}
+        <div class="modal fade" id="coefEdit{{ c.id }}" tabindex="-1">
+            <div class="modal-dialog modal-sm">
+                <form class="modal-content" method="post" action="/standards/coef/{{ c.id }}/edit">
+                    <div class="modal-header"><h6 class="modal-title">编辑「{{ c.category }}」</h6><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+                    <div class="modal-body">
+                        <div class="mb-2"><label class="form-label">系数</label><input type="number" step="0.05" class="form-control form-control-sm" name="coefficient" value="{{ c.coefficient }}"></div>
+                        <div class="mb-2"><label class="form-label">备注</label><input class="form-control form-control-sm" name="note" value="{{ c.note }}"></div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-sm btn-secondary" data-bs-dismiss="modal">取消</button>
+                        <button type="submit" class="btn btn-sm btn-primary">保存</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+        {% endfor %}
+        {% endif %}
+            </div>
+            {% if current_user.role == 'admin' %}
+            <div class="card-body border-top pt-3">
+                <form method="post" action="/standards/coef/add" class="row g-2 align-items-end">
+                    <div class="col-4"><label class="form-label" style="font-size:12px">新类别</label><input class="form-control form-control-sm" name="category" placeholder="如：实习课" required></div>
+                    <div class="col-4"><label class="form-label" style="font-size:12px">系数</label><input type="number" step="0.05" class="form-control form-control-sm" name="coefficient" value="1.0"></div>
+                    <div class="col-4"><label class="form-label" style="font-size:12px">备注</label><input class="form-control form-control-sm" name="note"></div>
+                    <div class="col-12"><button class="btn btn-sm btn-primary"><i class="fas fa-plus"></i> 添加学科系数</button></div>
+                </form>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+
+<div class="alert alert-light border mt-3" style="border-radius:12px;font-size:13px;color:#515154">
+    <i class="fas fa-info-circle" style="color:#007aff"></i>
+    <strong>计算口径：</strong>教师学期实际课时 = Σ(课表周课时 × 课程类别系数) × 有效教学周数 − 请假扣减；
+    标准课时 = 职务周标准 × 有效教学周数；超课时 = 实际 − 标准（超过部分），再 × 超课时单价 = 金额。
+    有效教学周数 = 学期工作日 − 停课日（可在「停课日管理」添加，或学期管理中手动指定）。
+</div>
+{% endblock %}

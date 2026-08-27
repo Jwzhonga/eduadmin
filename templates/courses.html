@@ -1,0 +1,95 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <h5 class="page-title mb-0"><i class="fas fa-book-open" style="color:#007aff;margin-right:8px"></i> 课程管理</h5>
+    {% if current_user and current_user.role == 'admin' %}
+    <button class="btn btn-primary btn-sm" data-bs-toggle="modal" data-bs-target="#addModal"><i class="fas fa-plus"></i> 添加课程</button>
+    {% endif %}
+</div>
+<div class="row g-2 mb-3">
+    <div class="col-6 col-md-2"><div class="card stat-card text-center h-100"><div class="number" style="color:#007aff">{{ stats.total }}</div><div class="label">课程总数</div></div></div>
+    {% for c in cats %}<div class="col-6 col-md-2"><div class="card stat-card text-center h-100"><div class="number">{{ stats[c] }}</div><div class="label">{{ c }}</div></div></div>{% endfor %}
+</div>
+<form method="get" action="/courses" class="d-flex gap-2 flex-wrap align-items-center mb-3 no-print">
+    <select name="category" class="form-select form-select-sm" style="width:140px">
+        <option value="">全部类别</option>
+        {% for c in cats %}<option value="{{ c }}" {% if cat == c %}selected{% endif %}>{{ c }}</option>{% endfor %}
+    </select>
+    <button class="btn btn-sm btn-outline-primary"><i class="fas fa-filter"></i> 筛选</button>
+    {% if cat %}<a href="/courses" class="btn btn-sm btn-outline-secondary">清除</a>{% endif %}
+</form>
+<div class="card">
+    <div class="table-responsive">
+        <table class="table table-hover table-sm table-sortable" id="coursesTable">
+            <thead>
+                <tr>
+                    <th style="width:60px">#</th>
+                    <th>课程名称</th><th>课程类别</th><th>默认周课时</th><th>备注</th>
+                    {% if current_user and current_user.role == 'admin' %}<th style="width:120px" data-no-sort>操作</th>{% endif %}
+                </tr>
+            </thead>
+            <tbody>
+                {% for r in rows %}
+                <tr>
+                    <td>{{ loop.index }}</td>
+                    <td>{{ r.name }}</td><td>{{ r.category }}</td><td>{{ r.default_weekly_hours }}</td><td>{{ r.remark }}</td>
+                    {% if current_user and current_user.role == 'admin' %}
+                    <td>
+                        <button class="btn btn-sm btn-outline-primary" data-bs-toggle="modal" data-bs-target="#editModal{{ r.id }}"><i class="fas fa-edit"></i></button>
+                        <button class="btn btn-sm btn-outline-danger" onclick="postDelete('/courses/{{ r.id }}/delete', {{ r.name|tojson|forceescape }})"><i class="fas fa-trash"></i></button>
+                    </td>
+                    {% endif %}
+                </tr>
+                {% else %}
+                <tr><td colspan="10" class="text-center text-muted py-4">暂无课程</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+{% if current_user and current_user.role == 'admin' %}
+<div class="modal fade" id="addModal" tabindex="-1">
+    <div class="modal-dialog modal-sm">
+        <form class="modal-content" method="post" action="/courses/add">
+            <div class="modal-header"><h6 class="modal-title">添加课程</h6><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+            <div class="modal-body">
+<div class="mb-2"><label class="form-label">课程名称</label><input class="form-control form-control-sm" name="name" required></div>
+<div class="mb-2"><label class="form-label">课程类别</label><select class="form-select form-select-sm" name="category"><option>文化课</option><option selected>专业课</option><option>实训课</option><option>公共课</option><option>体育</option></select></div>
+<div class="mb-2"><label class="form-label">默认周课时</label><input type="number" class="form-control form-control-sm" name="default_weekly_hours" value="4"></div>
+<div class="mb-2"><label class="form-label">备注</label><input type="text" class="form-control form-control-sm" name="remark"></div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-sm btn-secondary" data-bs-dismiss="modal">取消</button>
+                <button type="submit" class="btn btn-sm btn-primary">保存</button>
+            </div>
+        </form>
+    </div>
+</div>
+{% endif %}
+
+<div class="mb-4">
+{% if current_user and current_user.role == 'admin' %}
+{% for r in rows %}
+<div class="modal fade" id="editModal{{ r.id }}" tabindex="-1">
+    <div class="modal-dialog modal-sm">
+        <form class="modal-content" method="post" action="/courses/{{ r.id }}/edit">
+            <div class="modal-header"><h6 class="modal-title">编辑课程</h6><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+            <div class="modal-body">
+<div class="mb-2"><label class="form-label">课程名称</label><input type="text" class="form-control form-control-sm" name="name" value="{{ r.name }}"></div>
+<div class="mb-2"><label class="form-label">课程类别</label><select class="form-select form-select-sm" name="category">{% for c in ["文化课","专业课","实训课","公共课","体育"] %}<option{% if r.category == c %} selected{% endif %}>{{ c }}</option>{% endfor %}</select></div>
+<div class="mb-2"><label class="form-label">默认周课时</label><input type="number" class="form-control form-control-sm" name="default_weekly_hours" value="{{ r.default_weekly_hours }}"></div>
+<div class="mb-2"><label class="form-label">备注</label><input type="text" class="form-control form-control-sm" name="remark" value="{{ r.remark }}"></div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-sm btn-secondary" data-bs-dismiss="modal">取消</button>
+                <button type="submit" class="btn btn-sm btn-primary">保存</button>
+            </div>
+        </form>
+    </div>
+</div>
+{% endfor %}
+{% endif %}
+    </div>
+{% include '_pagination.html' %}
+{% endblock %}

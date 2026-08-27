@@ -1,0 +1,99 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <h5 class="page-title mb-0"><i class="fas fa-door-open" style="color:#007aff;margin-right:8px"></i> 教室管理</h5>
+    {% if current_user and current_user.role == 'admin' %}
+    <button class="btn btn-primary btn-sm" data-bs-toggle="modal" data-bs-target="#addModal"><i class="fas fa-plus"></i> 添加教室</button>
+    {% endif %}
+</div>
+<div class="row g-2 mb-3">
+    <div class="col-6 col-md-2"><div class="card stat-card text-center h-100"><div class="number" style="color:#007aff">{{ stats.total }}</div><div class="label">教室总数</div></div></div>
+    {% for c in ctypes %}<div class="col-6 col-md-2"><div class="card stat-card text-center h-100"><div class="number">{{ stats[c] }}</div><div class="label">{{ c }}</div></div></div>{% endfor %}
+</div>
+<form method="get" action="/classrooms" class="d-flex gap-2 flex-wrap align-items-center mb-3 no-print">
+    <input type="text" name="kw" class="form-control form-control-sm" placeholder="名称/门牌号" value="{{ kw }}" style="width:140px">
+    <select name="ctype" class="form-select form-select-sm" style="width:130px">
+        <option value="">全部类型</option>
+        {% for c in ctypes %}<option value="{{ c }}" {% if ct == c %}selected{% endif %}>{{ c }}</option>{% endfor %}
+    </select>
+    <button class="btn btn-sm btn-outline-primary"><i class="fas fa-filter"></i> 筛选</button>
+    {% if kw or ct %}<a href="/classrooms" class="btn btn-sm btn-outline-secondary">清除</a>{% endif %}
+</form>
+<div class="card">
+    <div class="table-responsive">
+        <table class="table table-hover table-sm table-sortable" id="classroomsTable">
+            <thead>
+                <tr>
+                    <th style="width:60px">#</th>
+                    <th>楼名</th><th>门牌号</th><th>类型</th><th>容量</th><th>备注</th>
+                    {% if current_user and current_user.role == 'admin' %}<th style="width:120px" data-no-sort>操作</th>{% endif %}
+                </tr>
+            </thead>
+            <tbody>
+                {% for r in rows %}
+                <tr>
+                    <td>{{ loop.index }}</td>
+                    <td>{{ r.building }}</td><td>{{ r.room_no }}</td><td>{{ r.ctype }}</td><td>{{ r.capacity }}</td>
+                    <td>{% if r.ctype != '机房' and room_class.get(r.id) %}<span class="badge text-bg-light border">{{ room_class[r.id] }}</span> {% endif %}{{ r.remark }}</td>
+                    {% if current_user and current_user.role == 'admin' %}
+                    <td>
+                        <button class="btn btn-sm btn-outline-primary" data-bs-toggle="modal" data-bs-target="#editModal{{ r.id }}"><i class="fas fa-edit"></i></button>
+                        <button class="btn btn-sm btn-outline-danger" onclick="postDelete('/classrooms/{{ r.id }}/delete', {{ r.name|tojson|forceescape }})"><i class="fas fa-trash"></i></button>
+                    </td>
+                    {% endif %}
+                </tr>
+                {% else %}
+                <tr><td colspan="10" class="text-center text-muted py-4">暂无教室</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+{% if current_user and current_user.role == 'admin' %}
+<div class="modal fade" id="addModal" tabindex="-1">
+    <div class="modal-dialog modal-sm">
+        <form class="modal-content" method="post" action="/classrooms/add">
+            <div class="modal-header"><h6 class="modal-title">添加教室</h6><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+            <div class="modal-body">
+<div class="mb-2"><label class="form-label">楼名</label><input class="form-control form-control-sm" name="building" placeholder="如：实训楼"></div>
+<div class="mb-2"><label class="form-label">门牌号</label><input class="form-control form-control-sm" name="room_no" placeholder="如：201"></div>
+<div class="mb-2"><label class="form-label">类型</label><select class="form-select form-select-sm" name="ctype"><option>普通教室</option><option>机房</option><option>实训室</option><option>多媒体教室</option></select></div>
+<div class="mb-2"><label class="form-label">容量</label><input type="number" class="form-control form-control-sm" name="capacity" value="50"></div>
+<div class="mb-2"><label class="form-label">备注</label><input type="text" class="form-control form-control-sm" name="remark"></div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-sm btn-secondary" data-bs-dismiss="modal">取消</button>
+                <button type="submit" class="btn btn-sm btn-primary">保存</button>
+            </div>
+        </form>
+    </div>
+</div>
+{% endif %}
+
+<div class="mb-4">
+{% if current_user and current_user.role == 'admin' %}
+{% for r in rows %}
+<div class="modal fade" id="editModal{{ r.id }}" tabindex="-1">
+    <div class="modal-dialog modal-sm">
+        <form class="modal-content" method="post" action="/classrooms/{{ r.id }}/edit">
+            <div class="modal-header"><h6 class="modal-title">编辑教室</h6><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+            <div class="modal-body">
+<div class="mb-2"><label class="form-label">楼名</label><input type="text" class="form-control form-control-sm" name="building" value="{{ r.building }}"></div>
+<div class="mb-2"><label class="form-label">门牌号</label><input type="text" class="form-control form-control-sm" name="room_no" value="{{ r.room_no }}"></div>
+<div class="mb-2"><label class="form-label">类型</label><select class="form-select form-select-sm" name="ctype">{% for c in ["普通教室","机房","实训室","多媒体教室"] %}<option{% if r.ctype == c %} selected{% endif %}>{{ c }}</option>{% endfor %}</select></div>
+<div class="mb-2"><label class="form-label">容量</label><input type="number" class="form-control form-control-sm" name="capacity" value="{{ r.capacity }}"></div>
+<div class="mb-2"><label class="form-label">备注</label><input type="text" class="form-control form-control-sm" name="remark" value="{{ r.remark }}"></div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-sm btn-secondary" data-bs-dismiss="modal">取消</button>
+                <button type="submit" class="btn btn-sm btn-primary">保存</button>
+            </div>
+        </form>
+    </div>
+</div>
+{% endfor %}
+{% endif %}
+    </div>
+{% include '_pagination.html' %}
+{% endblock %}
