@@ -335,9 +335,18 @@ def _log_operations(response):
                 module = _LOG_MODULE_MAP[ep]
                 if ep in _IMPORT_ENDPOINTS:
                     action = 'import'
+                elif ep == 'data_clear':
+                    action = 'clear'
+                elif ep == 'data_item_delete':
+                    action = 'delete'
                 else:
                     action = 'delete' if ep.endswith('delete') else ('add' if ep.endswith('add') else 'edit')
-                detail = request.form.get('name', request.form.get('username', ''))[:60]
+                if ep in ('data_clear', 'data_item_delete'):
+                    ttype = request.form.get('type', '')
+                    label = (DATA_TYPES.get(ttype) or {}).get('label', ttype or '?')
+                    detail = f'{label} ' + ('清空' if ep == 'data_clear' else '删除 #' + request.form.get('id', ''))
+                else:
+                    detail = request.form.get('name', request.form.get('username', ''))[:60]
                 db.session.add(OperationLog(user_id=uid, username=uname, action=action,
                                             module=module, detail=detail))
             db.session.commit()
@@ -1005,6 +1014,9 @@ def data_management():
         'night': NightShift.query.filter_by(semester_id=sid).count(),
         'overtimes': Overtime.query.filter_by(semester_id=sid).count(),
         'fees': ManagementFee.query.filter_by(semester_id=sid).count(),
+        'holidays': Holiday.query.filter_by(semester_id=sid).count(),
+        'school_days': SchoolDay.query.filter_by(semester_id=sid).count(),
+        'payments': Payment.query.filter_by(semester_id=sid).count(),
         'logs': OperationLog.query.count(),
     }
     backups = []
@@ -1200,8 +1212,10 @@ def _data_item_label(ttype, obj):
         tb = db.session.get(Textbook, obj.textbook_id) if obj.textbook_id else None
         return f'{tb.name if tb else "?"} ×{obj.quantity}（{obj.status}）'
     if ttype == 'issues':
-        tname = obj.teacher.name if obj.issue_type == 'teacher' and obj.teacher else ''
-        cname = obj.class_.name if obj.issue_type == 'class' and obj.class_ else ''
+        t = db.session.get(Teacher, obj.teacher_id) if obj.teacher_id else None
+        c = db.session.get(ClassInfo, obj.class_id) if obj.class_id else None
+        tname = t.name if obj.issue_type == 'teacher' and t else ''
+        cname = c.name if obj.issue_type == 'class' and c else ''
         tb = db.session.get(Textbook, obj.textbook_id) if obj.textbook_id else None
         return f'{tname or cname} ← {tb.name if tb else "?"}'
     if ttype == 'leaves':
@@ -1233,10 +1247,14 @@ def _data_item_label(ttype, obj):
 @app.route('/data/clear', methods=['POST'])
 @admin_required
 def data_clear():
-    """按类型清空当前学期数据（操作日志为全局）；只删目标表，不影响其他数据"""
+    """按类型清空当前学期数据（操作日志为全局）；只删目标表，不影响其他数据。
+    AJAX（X-Requested-With）返回 JSON，普通表单跳回数据管理页"""
     ttype = request.form.get('type', '')
     conf = DATA_TYPES.get(ttype)
+    is_ajax = request.headers.get('X-Requested-With') == 'XMLHttpRequest'
     if not conf:
+        if is_ajax:
+            return jsonify({'ok': False, 'error': '未知的数据类型'})
         flash('未知的数据类型')
         return redirect(url_for('data_management'))
     sid = get_current_semester_id()
@@ -1246,6 +1264,8 @@ def data_clear():
     n = q.count()
     q.delete(synchronize_session=False)
     db.session.commit()
+    if is_ajax:
+        return jsonify({'ok': True, 'count': n, 'label': conf['label']})
     flash(f'已清空「{conf["label"]}」{n} 条，其他数据不受影响')
     return redirect(url_for('data_management'))
 

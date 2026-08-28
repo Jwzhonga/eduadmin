@@ -185,7 +185,11 @@ function clearDataType(type, label) {
     fetch('/data/clear', {method:'POST',
         headers:{'Content-Type':'application/x-www-form-urlencoded','X-Requested-With':'XMLHttpRequest','X-CSRF-Token': cmCsrfToken()},
         body:'type=' + encodeURIComponent(type)})
-        .then(function(r) { if (r.ok) { location.reload(); } else { alert('清空失败'); } })
+        .then(function(r) { return r.json(); })
+        .then(function(j) {
+            if (j.ok) { alert('已清空「' + j.label + '」' + j.count + ' 条，其他数据不受影响'); location.reload(); }
+            else { alert(j.error || '清空失败'); }
+        })
         .catch(function() { alert('清空失败，请重试'); });
 }
 </script>
