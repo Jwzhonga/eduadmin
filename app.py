@@ -318,7 +318,8 @@ _IMPORT_ENDPOINTS = {'import_do', 'night_import_do'}
 def _log_operations(response):
     """记录写操作日志（POST 请求 + 登录/登出）；被权限拦截的请求不记"""
     try:
-        if getattr(g, '_blocked', False):
+        if getattr(g, '_blocked', False) or getattr(g, '_data_deny', False):
+            g._data_deny = False  # 防残留：同 app context 连续请求会复用 g
             return response
         if request.method == 'POST' or request.endpoint in ('login', 'logout'):
             ep = request.endpoint or ''
@@ -1253,6 +1254,7 @@ def data_clear():
     conf = DATA_TYPES.get(ttype)
     is_ajax = request.headers.get('X-Requested-With') == 'XMLHttpRequest'
     if not conf:
+        g._data_deny = True  # 清空失败不记 clear 日志
         if is_ajax:
             return jsonify({'ok': False, 'error': '未知的数据类型'})
         flash('未知的数据类型')
@@ -1297,6 +1299,7 @@ def data_item_delete():
     is_ajax = request.headers.get('X-Requested-With') == 'XMLHttpRequest'
 
     def fail(msg):
+        g._data_deny = True  # 删除失败不记 delete 日志（审计准确性）
         if is_ajax:
             return jsonify({'ok': False, 'error': msg})
         flash(msg)
