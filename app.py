@@ -560,13 +560,24 @@ class ScheduleCell(db.Model):
     week_type = db.Column(db.String(8), default='every') # every/odd/even
 
 class Holiday(db.Model):
-    """节假日/停课日（超课时统计扣减）"""
+    """节假日/停课日（校历特殊日：停课日，仅记录管理，不参与有效周计算）"""
     __tablename__ = 'holiday'
     id = db.Column(db.Integer, primary_key=True)
     semester_id = db.Column(db.Integer, db.ForeignKey('semester.id'), nullable=False)
     holiday_date = db.Column(db.Date, nullable=False)
     name = db.Column(db.String(64), default='放假')
     remark = db.Column(db.String(255), default='')
+
+class SchoolDay(db.Model):
+    """上课日（校历特殊日：调休补课）——具体日期 或 星期几规律，二选一"""
+    __tablename__ = 'school_day'
+    id = db.Column(db.Integer, primary_key=True)
+    semester_id = db.Column(db.Integer, db.ForeignKey('semester.id'), nullable=False)
+    day_date = db.Column(db.Date, nullable=True)      # 具体日期模式（如 2026-10-10 国庆调休补课）
+    weekday = db.Column(db.Integer, nullable=True)    # 星期几规律模式（1=周一..7=周日，本学期内每周该日都算上课日）
+    name = db.Column(db.String(64), default='补课')
+    remark = db.Column(db.String(255), default='')
+    created_at = db.Column(db.DateTime, default=datetime.now)
 
 class LeaveRequest(db.Model):
     """教师请假 → 审批 → 安排看课教师（补助）"""
@@ -1130,7 +1141,7 @@ def data_reset():
     _create_backup('reset_auto')  # 重置前自动备份
     models = [ClassInfo, Teacher, Course, Classroom, Textbook, OrderPlan, BookIssue,
               TeachingTask, ScheduleCell, LeaveRequest, NightShift, Overtime,
-              ManagementFee, OperationLog, BookStockLog, Holiday, Semester, Payment]
+              ManagementFee, OperationLog, BookStockLog, Holiday, SchoolDay, Semester, Payment]
     # 课时标准/学科系数属系统配置（与系统设置同），重置不删除
     for m in models:
         try:
@@ -1901,7 +1912,7 @@ def semester_delete(sid):
         return redirect(url_for('index'))
     # 级联删除所有关联数据（子→父顺序）
     for m in (ScheduleCell, TeachingTask, BookIssue, OrderPlan, NightShift,
-              LeaveRequest, Overtime, ManagementFee, Holiday):
+              LeaveRequest, Overtime, ManagementFee, Holiday, SchoolDay):
         m.query.filter_by(semester_id=sid).delete()
     ClassInfo.query.filter_by(semester_id=sid).delete()
     Teacher.query.filter_by(semester_id=sid).delete()
@@ -3313,7 +3324,8 @@ def standards_coef_delete(cid):
 @login_required
 def holidays_page():
     rows = sem_filter(Holiday.query).order_by(Holiday.holiday_date).all()
-    return render_template('holidays.html', rows=rows)
+    school_days = sem_filter(SchoolDay.query).order_by(SchoolDay.day_date, SchoolDay.weekday).all()
+    return render_template('holidays.html', rows=rows, school_days=school_days)
 
 
 @app.route('/holidays/add', methods=['POST'])
@@ -3344,6 +3356,57 @@ def holidays_delete(hid):
         flash('记录不存在')
         return redirect(url_for('holidays_page'))
     db.session.delete(h)
+    db.session.commit()
+    flash('已删除')
+    return redirect(url_for('holidays_page'))
+
+
+@app.route('/school-days/add', methods=['POST'])
+@admin_required
+def school_days_add():
+    """添加上课日（调休补课）：mode=date 具体日期 / mode=weekday 星期几规律"""
+    sid = get_current_semester_id()
+    mode = request.form.get('mode', 'date')
+    name = request.form.get('name', '').strip() or '补课'
+    remark = request.form.get('remark', '').strip()
+    if mode == 'weekday':
+        # 星期几规律：可多选，每条一个 weekday
+        wkds = [int(w) for w in request.form.getlist('weekdays') if w.isdigit() and 1 <= int(w) <= 7]
+        if not wkds:
+            flash('请选择星期几')
+            return redirect(request.referrer or url_for('holidays_page'))
+        added = 0
+        for wd in sorted(set(wkds)):
+            if SchoolDay.query.filter_by(semester_id=sid, weekday=wd).first():
+                continue
+            db.session.add(SchoolDay(semester_id=sid, weekday=wd, name=name, remark=remark))
+            added += 1
+        db.session.commit()
+        flash(f'已添加 {added} 条上课日规律' if added else '所选星期几已在上课日名单中')
+    else:
+        hd = request.form.get('day_date', '').strip()
+        try:
+            d = datetime.strptime(hd, '%Y-%m-%d').date()
+        except Exception:
+            flash('日期格式错误')
+            return redirect(request.referrer or url_for('holidays_page'))
+        if SchoolDay.query.filter_by(semester_id=sid, day_date=d).first():
+            flash('该日期已在上课日名单中')
+            return redirect(request.referrer or url_for('holidays_page'))
+        db.session.add(SchoolDay(semester_id=sid, day_date=d, name=name, remark=remark))
+        db.session.commit()
+        flash('上课日已添加')
+    return redirect(url_for('holidays_page'))
+
+
+@app.route('/school-days/<int:sdid>/delete', methods=['POST'])
+@admin_required
+def school_days_delete(sdid):
+    sd = db.session.get(SchoolDay, sdid)
+    if not sd:
+        flash('记录不存在')
+        return redirect(url_for('holidays_page'))
+    db.session.delete(sd)
     db.session.commit()
     flash('已删除')
     return redirect(url_for('holidays_page'))

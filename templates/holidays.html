@@ -1,9 +1,12 @@
 {% extends "base.html" %}
 {% block content %}
 <div class="d-flex justify-content-between align-items-center mb-3">
-    <h5 class="page-title mb-0"><i class="fas fa-umbrella-beach" style="color:#007aff;margin-right:8px"></i> 停课日管理（节假日/学校活动）</h5>
+    <h5 class="page-title mb-0"><i class="fas fa-calendar-alt" style="color:#007aff;margin-right:8px"></i> 校历特殊日管理（停课 / 调休补课）</h5>
     {% if current_user and current_user.role == 'admin' %}
-    <button class="btn btn-primary btn-sm" data-bs-toggle="modal" data-bs-target="#addModal"><i class="fas fa-plus"></i> 添加停课日</button>
+    <div>
+        <button class="btn btn-outline-danger btn-sm me-1" data-bs-toggle="modal" data-bs-target="#addModal"><i class="fas fa-umbrella-beach"></i> 添加停课日</button>
+        <button class="btn btn-outline-success btn-sm" data-bs-toggle="modal" data-bs-target="#addSchoolDayModal"><i class="fas fa-calendar-check"></i> 添加上课日</button>
+    </div>
     {% endif %}
 </div>
 
@@ -16,6 +19,14 @@
 </div>
 {% endif %}
 
+<ul class="nav nav-tabs mb-3" role="tablist" style="font-size:13px">
+    <li class="nav-item"><a class="nav-link active" data-bs-toggle="tab" href="#tabOff" role="tab"><i class="fas fa-umbrella-beach" style="margin-right:4px"></i>停课日（{{ rows|length }}）</a></li>
+    <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#tabOn" role="tab"><i class="fas fa-calendar-check" style="margin-right:4px"></i>上课日（{{ school_days|length }}）</a></li>
+</ul>
+
+<div class="tab-content">
+<!-- ──────────── 停课日 ──────────── -->
+<div class="tab-pane fade show active" id="tabOff" role="tabpanel">
 <div class="card">
     <div class="table-responsive">
         <table class="table table-hover table-sm table-sortable" id="holidaysTable">
@@ -50,8 +61,54 @@
         </table>
     </div>
 </div>
+</div>
+
+<!-- ──────────── 上课日 ──────────── -->
+<div class="tab-pane fade" id="tabOn" role="tabpanel">
+<div class="card">
+    <div class="table-responsive">
+        <table class="table table-hover table-sm table-sortable" id="schoolDaysTable">
+            <thead>
+                <tr>
+                    <th style="width:60px">#</th>
+                    <th>类型</th>
+                    <th>日期 / 星期</th>
+                    <th>名称</th>
+                    <th>备注</th>
+                    {% if current_user and current_user.role == 'admin' %}<th style="width:80px" data-no-sort>操作</th>{% endif %}
+                </tr>
+            </thead>
+            <tbody>
+                {% for r in school_days %}
+                <tr>
+                    <td>{{ loop.index }}</td>
+                    {% if r.day_date %}
+                    <td><span class="badge text-bg-success">具体日期</span></td>
+                    <td>{{ r.day_date.strftime('%Y-%m-%d') }}（{{ ['周一','周二','周三','周四','周五','周六','周日'][r.day_date.weekday()] }}）</td>
+                    {% else %}
+                    <td><span class="badge text-bg-primary">星期规律</span></td>
+                    <td>每周{{ ['一','二','三','四','五','六','日'][r.weekday - 1] }}</td>
+                    {% endif %}
+                    <td>{{ r.name }}</td>
+                    <td>{{ r.remark }}</td>
+                    {% if current_user and current_user.role == 'admin' %}
+                    <td>
+                        <button class="btn btn-sm btn-outline-danger" onclick="postDelete('/school-days/{{ r.id }}/delete','确定删除该上课日？')"><i class="fas fa-trash"></i></button>
+                    </td>
+                    {% endif %}
+                </tr>
+                {% else %}
+                <tr><td colspan="6" class="text-center text-muted py-4">暂无上课日记录（调休补课、周末补课等）</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+</div>
+</div>
 
 {% if current_user and current_user.role == 'admin' %}
+<!-- 添加停课日 -->
 <div class="modal fade" id="addModal" tabindex="-1">
     <div class="modal-dialog modal-sm">
         <form class="modal-content" method="post" action="/holidays/add">
@@ -68,5 +125,72 @@
         </form>
     </div>
 </div>
+
+<!-- 添加上课日（具体日期 / 星期几规律） -->
+<div class="modal fade" id="addSchoolDayModal" tabindex="-1">
+    <div class="modal-dialog modal-sm">
+        <form class="modal-content" method="post" action="/school-days/add">
+            <div class="modal-header"><h6 class="modal-title">添加上课日（调休补课）</h6><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+            <div class="modal-body">
+                <div class="mb-2">
+                    <label class="form-label">添加方式</label>
+                    <div class="btn-group w-100 btn-group-sm" role="group">
+                        <input type="radio" class="btn-check" name="mode" id="sdModeDate" value="date" checked>
+                        <label class="btn btn-outline-primary" for="sdModeDate">具体日期</label>
+                        <input type="radio" class="btn-check" name="mode" id="sdModeWeekday" value="weekday">
+                        <label class="btn btn-outline-primary" for="sdModeWeekday">星期几规律</label>
+                    </div>
+                </div>
+                <div id="sdDateWrap">
+                    <div class="mb-2">
+                        <label class="form-label">日期</label>
+                        <input type="date" class="form-control form-control-sm" name="day_date" id="sdDayDate">
+                        <div id="sdDateWeekday" style="font-size:12px;color:#86868b;margin-top:4px"></div>
+                    </div>
+                </div>
+                <div id="sdWeekdayWrap" style="display:none">
+                    <label class="form-label">每周哪几天上课（可多选，本学期内每周该日都算上课日）</label>
+                    <div class="d-flex flex-wrap gap-2 mb-2">
+                        {% for w in range(1, 8) %}
+                        <div class="form-check form-check-inline">
+                            <input class="form-check-input" type="checkbox" name="weekdays" value="{{ w }}" id="sdWk{{ w }}">
+                            <label class="form-check-label" for="sdWk{{ w }}">周{{ ['一','二','三','四','五','六','日'][w - 1] }}</label>
+                        </div>
+                        {% endfor %}
+                    </div>
+                </div>
+                <div class="mb-2"><label class="form-label">名称</label><input class="form-control form-control-sm" name="name" placeholder="如：国庆调休补课" value="补课"></div>
+                <div class="mb-2"><label class="form-label">备注</label><input class="form-control form-control-sm" name="remark"></div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-sm btn-secondary" data-bs-dismiss="modal">取消</button>
+                <button type="submit" class="btn btn-sm btn-primary">保存</button>
+            </div>
+        </form>
+    </div>
+</div>
 {% endif %}
+
+<script>
+(function() {
+    var WEEK = ['周一','周二','周三','周四','周五','周六','周日'];
+    // 模式切换
+    function syncMode() {
+        var dateMode = document.getElementById('sdModeDate').checked;
+        document.getElementById('sdDateWrap').style.display = dateMode ? 'block' : 'none';
+        document.getElementById('sdWeekdayWrap').style.display = dateMode ? 'none' : 'block';
+    }
+    var m1 = document.getElementById('sdModeDate'), m2 = document.getElementById('sdModeWeekday');
+    if (m1) { m1.addEventListener('change', syncMode); m2.addEventListener('change', syncMode); }
+    // 日期 → 自动带出星期几
+    var dd = document.getElementById('sdDayDate');
+    if (dd) dd.addEventListener('change', function() {
+        var el = document.getElementById('sdDateWeekday');
+        if (!dd.value) { el.textContent = ''; return; }
+        var d = new Date(dd.value + 'T00:00:00');
+        var wd = d.getDay(); // 0=周日
+        el.textContent = '该日是 ' + WEEK[(wd + 6) % 7];
+    });
+})();
+</script>
 {% endblock %}
