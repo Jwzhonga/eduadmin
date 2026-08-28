@@ -435,19 +435,12 @@ class Semester(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.now)
 
     def effective_weeks(self):
-        """有效教学周数：手动值优先，否则按 工作日-节假日 自动计算"""
+        """有效教学周数：手动值优先（整数），否则按自然周计算——放假停课也按一整周算，恒为整数。
+        第 1 周 = 包含学期开始日的那一周（以该周周日为基准），与周次/周期基准一致"""
         if self.teaching_weeks:
-            return float(self.teaching_weeks)
-        workdays = get_setting_int('workdays', 5)
-        d = self.start_date
-        cnt = 0
-        while d <= self.end_date:
-            if d.isoweekday() <= workdays:
-                hol = Holiday.query.filter_by(semester_id=self.id, holiday_date=d).first()
-                if not hol:
-                    cnt += 1
-            d += timedelta(days=1)
-        return round(cnt / max(workdays, 1), 2)
+            return int(round(float(self.teaching_weeks)))
+        base = self.start_date - timedelta(days=(self.start_date.weekday() + 1) % 7)
+        return int(((self.end_date - base).days // 7) + 1)
 
 class ClassInfo(db.Model):
     __tablename__ = 'class_info'
@@ -1891,7 +1884,7 @@ def semester_edit(sid):
         flash('日期格式错误')
         return redirect(url_for('index'))
     tw = request.form.get('teaching_weeks', '').strip()
-    s.teaching_weeks = float(tw) if re.match(r'^\d+(\.\d+)?$', tw) else None
+    s.teaching_weeks = int(tw) if re.match(r'^\d+$', tw) else None
     db.session.commit()
     flash('学期信息已更新')
     return redirect(request.referrer or url_for('index'))
@@ -3370,6 +3363,16 @@ def position_std_hours(position):
     return p.weekly_std_hours if p else 12.0
 
 
+def _int_if_whole(v):
+    """值等于整数时转 int，避免界面出现 15.0 这类小数点（0.5 隔周课等真实小数保留）"""
+    try:
+        if float(v) == int(v):
+            return int(v)
+    except (TypeError, ValueError):
+        pass
+    return v
+
+
 def workload_rows(sid):
     """超课时统计明细行（无学科系数，上一节算一节，全部整数）"""
     if not sid:
@@ -3398,10 +3401,10 @@ def workload_rows(sid):
         std_total = round(std_weekly * weeks)
         extra = max(0, actual - std_total)
         amount = extra * int(get_setting_float('extra_hour_unit_price', 0) + 0.5)
-        rows.append({'teacher': t, 'weekly_raw': round(weekly_raw, 2),
-                     'weekly_coef': round(weekly_raw, 2), 'weeks': weeks,
+        rows.append({'teacher': t, 'weekly_raw': _int_if_whole(round(weekly_raw, 2)),
+                     'weekly_coef': _int_if_whole(round(weekly_raw, 2)), 'weeks': weeks,
                      'actual': actual, 'leave_periods': leave_periods,
-                     'std_weekly': std_weekly, 'std_total': std_total,
+                     'std_weekly': _int_if_whole(std_weekly), 'std_total': std_total,
                      'extra': extra, 'amount': amount})
     rows.sort(key=lambda r: -r['extra'])
     return rows, weeks
@@ -3429,28 +3432,22 @@ def _month_weeks(sem):
 
 def _period_weeks(sem):
     """学期内每 4 周一个结算周期：[(period_no, start, end, 有效周数)]
-    第 1 周 = 包含学期开始日的那一周（以该周周日为基准）；有效周数口径与 effective_weeks 一致"""
+    第 1 周 = 包含学期开始日的那一周（以该周周日为基准）；周期有效周数按自然周计算，
+    放假停课也按整周算，恒为整数（完整周期=4，末周期按实际自然周数）"""
     if not sem:
         return []
-    workdays = get_setting_int('workdays', 5)
     res = []
     base = sem.start_date - timedelta(days=(sem.start_date.weekday() + 1) % 7)
     d = sem.start_date
     pno = 1
     p_start = d
-    work_days = 0
     while d <= sem.end_date:
-        if d.isoweekday() <= workdays:
-            hol = Holiday.query.filter_by(semester_id=sem.id, holiday_date=d).first()
-            if not hol:
-                work_days += 1
         span = (d - base).days + 1
         if span % 28 == 0 or d == sem.end_date:
-            eff = round(work_days / max(workdays, 1), 2)
+            eff = int(((d - p_start).days // 7) + 1)
             res.append((pno, p_start, d, eff))
             pno += 1
             p_start = d + timedelta(days=1)
-            work_days = 0
         d += timedelta(days=1)
     return res
 
@@ -3506,9 +3503,10 @@ def workload_period_rows(sid, pno):
         std_total = round(std_weekly * eff_weeks)
         extra = max(0, actual - std_total)
         amount = extra * int(get_setting_float('extra_hour_unit_price', 0) + 0.5)
-        rows.append({'teacher': t, 'weekly_raw': weekly_raw, 'weekly_coef': weekly_coef,
-                     'weeks': eff_weeks, 'actual': actual, 'leave_periods': leave_periods,
-                     'std_weekly': std_weekly, 'std_total': std_total,
+        rows.append({'teacher': t, 'weekly_raw': _int_if_whole(weekly_raw),
+                     'weekly_coef': _int_if_whole(weekly_coef), 'weeks': eff_weeks,
+                     'actual': actual, 'leave_periods': leave_periods,
+                     'std_weekly': _int_if_whole(std_weekly), 'std_total': std_total,
                      'extra': extra, 'amount': amount})
     rows.sort(key=lambda r: -r['extra'])
     return rows, periods
@@ -4449,7 +4447,7 @@ def reports_export():
 
 SETTING_DEFS = [
     ('school_name', '榆中县职业技术学校', '学校名称（报表抬头）'),
-    ('workdays', '5', '每周上课天数（5/6/7，排课与教学周计算用）'),
+    ('workdays', '5', '每周上课天数（5/6/7，排课用；教学周按自然周计算不受此影响）'),
     ('periods_per_day', '8', '每天节数（排课用）'),
     ('watch_unit_price', '15', '顶课补助单价（换课上课/调课看班，元/节）'),
     ('night_shift_unit_price', '20', '夜自习补贴单价（元/次）'),
