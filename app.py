@@ -251,6 +251,9 @@ _LOG_MODULE_MAP = {
     'night_add': '夜自习', 'night_edit': '夜自习', 'night_delete': '夜自习',
     'overtimes_add': '加班', 'overtimes_delete': '加班',
     'fees_add': '管理费', 'fees_delete': '管理费',
+    'holidays_add': '停课日', 'holidays_delete': '停课日',
+    'school_days_add': '上课日', 'school_days_delete': '上课日',
+    'data_clear': '数据管理', 'data_item_delete': '数据管理',
     'semester_add': '学期', 'semester_delete': '学期', 'semester_set': '学期',
     'settings_save': '系统设置', 'import_do': '数据导入', 'night_import_do': '夜自习导入',
     'change_password': '账号',
@@ -281,7 +284,7 @@ BREADCRUMB_MAP = {
     'leaves_page': [('调课请假', ''), ('请假看课', '/leaves')],
     'leaves_stats': [('调课请假', ''), ('看课统计', '/leaves/stats')],
     'standards_page': [('超课时', ''), ('课时标准', '/standards')],
-    'holidays_page': [('超课时', ''), ('停课日', '/holidays')],
+    'holidays_page': [('超课时', ''), ('停课/上课日', '/holidays')],
     'workload_page': [('超课时', ''), ('超课时统计', '/workload')],
     'night_page': [('夜自习', ''), ('排班管理', '/night')],
     'night_stats': [('夜自习', ''), ('统计补助', '/night/stats')],
@@ -1153,6 +1156,148 @@ def data_reset():
     return redirect(url_for('data_management'))
 
 
+# ── 单项数据删除（数据管理页）：只删目标类型，不牵连其他数据 ──
+DATA_TYPES = {
+    'classes': {'label': '班级', 'model': ClassInfo},
+    'teachers': {'label': '教师', 'model': Teacher},
+    'courses': {'label': '课程', 'model': Course},
+    'rooms': {'label': '教室', 'model': Classroom},
+    'textbooks': {'label': '教材', 'model': Textbook},
+    'tasks': {'label': '教学任务', 'model': TeachingTask},
+    'cells': {'label': '课表格子', 'model': ScheduleCell},
+    'orders': {'label': '征订计划', 'model': OrderPlan},
+    'issues': {'label': '发书记录', 'model': BookIssue},
+    'leaves': {'label': '请假记录', 'model': LeaveRequest},
+    'night': {'label': '夜自习排班', 'model': NightShift},
+    'overtimes': {'label': '加班记录', 'model': Overtime},
+    'fees': {'label': '管理费', 'model': ManagementFee},
+    'holidays': {'label': '停课日', 'model': Holiday},
+    'school_days': {'label': '上课日', 'model': SchoolDay},
+    'payments': {'label': '补助发放', 'model': Payment},
+    'logs': {'label': '操作日志', 'model': OperationLog, 'global': True},
+}
+
+
+def _data_item_label(ttype, obj):
+    """单条记录展示标签"""
+    if ttype == 'classes':
+        return obj.name
+    if ttype == 'teachers':
+        return obj.name
+    if ttype == 'courses':
+        return obj.name
+    if ttype == 'rooms':
+        return obj.name
+    if ttype == 'textbooks':
+        return obj.name
+    if ttype == 'tasks':
+        c = db.session.get(Course, obj.course_id) if obj.course_id else None
+        return f'{c.name if c else "?"}（周{obj.weekly_hours}节）'
+    if ttype == 'cells':
+        cls = db.session.get(ClassInfo, obj.class_id) if obj.class_id else None
+        return f'{cls.name if cls else "?"} 周{obj.weekday} 第{obj.period}节'
+    if ttype == 'orders':
+        tb = db.session.get(Textbook, obj.textbook_id) if obj.textbook_id else None
+        return f'{tb.name if tb else "?"} ×{obj.quantity}（{obj.status}）'
+    if ttype == 'issues':
+        tname = obj.teacher.name if obj.issue_type == 'teacher' and obj.teacher else ''
+        cname = obj.class_.name if obj.issue_type == 'class' and obj.class_ else ''
+        tb = db.session.get(Textbook, obj.textbook_id) if obj.textbook_id else None
+        return f'{tname or cname} ← {tb.name if tb else "?"}'
+    if ttype == 'leaves':
+        t = db.session.get(Teacher, obj.teacher_id) if obj.teacher_id else None
+        return f'{t.name if t else "?"} {obj.leave_date} {obj.reason or ""}'
+    if ttype == 'night':
+        t = db.session.get(Teacher, obj.teacher_id) if obj.teacher_id else None
+        return f'{obj.shift_date} {t.name if t else "?"}'
+    if ttype == 'overtimes':
+        t = db.session.get(Teacher, obj.teacher_id) if obj.teacher_id else None
+        return f'{t.name if t else "?"} {obj.work_date} {obj.reason or ""}'
+    if ttype == 'fees':
+        t = db.session.get(Teacher, obj.teacher_id) if obj.teacher_id else None
+        return f'{t.name if t else "?"} {obj.month} {obj.fee_type}'
+    if ttype == 'holidays':
+        return f'{obj.holiday_date} {obj.name}'
+    if ttype == 'school_days':
+        if obj.day_date:
+            return f'{obj.day_date}（{"一二三四五六日"[obj.day_date.weekday()]}）{obj.name}'
+        return f'每周{"一二三四五六日"[obj.weekday - 1]} {obj.name}'
+    if ttype == 'payments':
+        t = db.session.get(Teacher, obj.teacher_id) if obj.teacher_id else None
+        return f'{t.name if t else "?"} 第{obj.period_no}周期 {obj.category} {obj.amount}元'
+    if ttype == 'logs':
+        return f'{obj.created_at.strftime("%m-%d %H:%M")} {obj.username} {obj.action} {obj.module} {obj.detail[:40]}'
+    return f'#{obj.id}'
+
+
+@app.route('/data/clear', methods=['POST'])
+@admin_required
+def data_clear():
+    """按类型清空当前学期数据（操作日志为全局）；只删目标表，不影响其他数据"""
+    ttype = request.form.get('type', '')
+    conf = DATA_TYPES.get(ttype)
+    if not conf:
+        flash('未知的数据类型')
+        return redirect(url_for('data_management'))
+    sid = get_current_semester_id()
+    q = conf['model'].query
+    if not conf.get('global'):
+        q = q.filter_by(semester_id=sid)
+    n = q.count()
+    q.delete(synchronize_session=False)
+    db.session.commit()
+    flash(f'已清空「{conf["label"]}」{n} 条，其他数据不受影响')
+    return redirect(url_for('data_management'))
+
+
+@app.route('/data/items')
+@login_required
+def data_items():
+    """单条删除列表（HTML 片段）：当前学期该类型记录，最多 200 条"""
+    ttype = request.args.get('type', '')
+    conf = DATA_TYPES.get(ttype)
+    if not conf:
+        return '', 400
+    sid = get_current_semester_id()
+    q = conf['model'].query
+    if not conf.get('global'):
+        q = q.filter_by(semester_id=sid)
+    rows = q.order_by(conf['model'].id.desc()).limit(200).all()
+    items = [{'id': r.id, 'label': _data_item_label(ttype, r)} for r in rows]
+    return render_template('_data_items.html', items=items, ttype=ttype, total=len(rows))
+
+
+@app.route('/data/item/delete', methods=['POST'])
+@admin_required
+def data_item_delete():
+    """删除单条记录（仅限当前学期；操作日志全局）。AJAX 返回 JSON，普通表单跳回数据管理页"""
+    ttype = request.form.get('type', '')
+    rid = request.form.get('id', '')
+    conf = DATA_TYPES.get(ttype)
+    is_ajax = request.headers.get('X-Requested-With') == 'XMLHttpRequest'
+
+    def fail(msg):
+        if is_ajax:
+            return jsonify({'ok': False, 'error': msg})
+        flash(msg)
+        return redirect(url_for('data_management'))
+
+    if not conf or not rid.isdigit():
+        return fail('参数错误')
+    obj = db.session.get(conf['model'], int(rid))
+    if not obj:
+        return fail('记录不存在')
+    if not conf.get('global') and obj.semester_id != get_current_semester_id():
+        return fail('只能删除当前学期的记录')
+    label = _data_item_label(ttype, obj)
+    db.session.delete(obj)
+    db.session.commit()
+    if is_ajax:
+        return jsonify({'ok': True, 'label': label})
+    flash(f'已删除「{conf["label"]}」：{label}')
+    return redirect(url_for('data_management'))
+
+
 PAYMENT_CATEGORIES = ['调课', '超课时', '管理', '夜自习', '出卷', '监考']
 
 
@@ -1895,7 +2040,7 @@ def semester_edit(sid):
         flash('日期格式错误')
         return redirect(url_for('index'))
     tw = request.form.get('teaching_weeks', '').strip()
-    s.teaching_weeks = int(tw) if re.match(r'^\d+$', tw) else None
+    s.teaching_weeks = int(tw) if re.match(r'^[1-9]\d*$', tw) else None
     db.session.commit()
     flash('学期信息已更新')
     return redirect(request.referrer or url_for('index'))
@@ -3338,6 +3483,10 @@ def holidays_add():
     except Exception:
         flash('日期格式错误')
         return redirect(request.referrer or url_for('holidays_page'))
+    sem = db.session.get(Semester, get_current_semester_id())
+    if sem and not (sem.start_date <= d <= sem.end_date):
+        flash('停课日必须在学期日期范围内')
+        return redirect(request.referrer or url_for('holidays_page'))
     if Holiday.query.filter_by(semester_id=get_current_semester_id(), holiday_date=d).first():
         flash('该日期已在停课名单中')
         return redirect(request.referrer or url_for('holidays_page'))
@@ -3389,6 +3538,10 @@ def school_days_add():
             d = datetime.strptime(hd, '%Y-%m-%d').date()
         except Exception:
             flash('日期格式错误')
+            return redirect(request.referrer or url_for('holidays_page'))
+        sem = db.session.get(Semester, sid)
+        if sem and not (sem.start_date <= d <= sem.end_date):
+            flash('上课日必须在学期日期范围内')
             return redirect(request.referrer or url_for('holidays_page'))
         if SchoolDay.query.filter_by(semester_id=sid, day_date=d).first():
             flash('该日期已在上课日名单中')

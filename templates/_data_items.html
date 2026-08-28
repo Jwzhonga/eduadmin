@@ -1,0 +1,13 @@
+{% if items %}
+{% for it in items %}
+<tr id="di-{{ ttype }}-{{ it.id }}">
+    <td class="text-truncate" style="max-width:480px" title="{{ it.label }}">{{ it.label }}</td>
+    <td style="width:70px">
+        <button class="btn btn-sm btn-outline-danger" title="删除该条" onclick="delDataItem('{{ ttype }}', {{ it.id }}, this)"><i class="fas fa-trash"></i></button>
+    </td>
+</tr>
+{% endfor %}
+<tr><td colspan="2" class="text-center text-muted py-1" style="font-size:12px">共 {{ total }} 条（最多显示 200 条，如需清理更多请用「清空」）</td></tr>
+{% else %}
+<tr><td colspan="2" class="text-center text-muted py-3">当前学期暂无记录</td></tr>
+{% endif %}

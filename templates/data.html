@@ -88,6 +88,38 @@
 </div>
 
 {% if current_user and current_user.role == 'admin' %}
+<h6 class="text-muted mt-3 mb-2" style="font-size:13px"><i class="fas fa-broom" style="color:#d97706"></i> 单项数据删除（只删所选类型，不影响其他数据；建议先备份）</h6>
+<div class="card">
+    <div class="table-responsive">
+        <table class="table table-hover table-sm" style="font-size:13px">
+            <thead><tr><th>数据类型</th><th style="width:110px">当前数量</th><th style="width:240px">操作</th></tr></thead>
+            <tbody>
+                {% for key, label in [('classes','班级'),('teachers','教师'),('courses','课程'),('rooms','教室'),('textbooks','教材'),('tasks','教学任务'),('cells','课表格子'),('orders','征订计划'),('issues','发书记录'),('leaves','请假记录'),('night','夜自习排班'),('overtimes','加班记录'),('fees','管理费'),('holidays','停课日'),('school_days','上课日'),('payments','补助发放'),('logs','操作日志')] %}
+                <tr>
+                    <td>{{ label }}{% if key == 'logs' %}<span class="badge text-bg-secondary ms-1" style="font-size:10px">全局</span>{% endif %}</td>
+                    <td>{{ stats[key] }}</td>
+                    <td>
+                        <button class="btn btn-sm btn-outline-secondary" onclick="loadDataItems('{{ key }}', this)"><i class="fas fa-list"></i> 查看/删除</button>
+                        <button class="btn btn-sm btn-outline-danger" onclick="clearDataType('{{ key }}','{{ label }}')"><i class="fas fa-broom"></i> 清空</button>
+                    </td>
+                </tr>
+                <tr class="d-none" id="items-row-{{ key }}">
+                    <td colspan="3" style="padding:0">
+                        <div style="max-height:300px;overflow:auto">
+                            <table class="table table-sm mb-0" style="background:#fafafa">
+                                <tbody id="items-body-{{ key }}"></tbody>
+                            </table>
+                        </div>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endif %}
+
+{% if current_user and current_user.role == 'admin' %}
 <div class="card mt-3 border-danger-subtle">
     <div class="card-header text-danger" style="padding:10px 16px"><i class="fas fa-exclamation-triangle"></i> 危险操作：重置全部数据</div>
     <div class="card-body">
@@ -120,4 +152,41 @@
         </form>
     </div>
 </div>
+<script>
+/* ── 单项数据删除：查看/删除 + 按类型清空 ── */
+function loadDataItems(type, btn) {
+    var row = document.getElementById('items-row-' + type);
+    var body = document.getElementById('items-body-' + type);
+    if (!row.classList.contains('d-none')) { row.classList.add('d-none'); return; }
+    row.classList.remove('d-none');
+    body.innerHTML = '<tr><td colspan="2" class="text-center text-muted py-3">加载中…</td></tr>';
+    fetch('/data/items?type=' + encodeURIComponent(type))
+        .then(function(r) { return r.text(); })
+        .then(function(html) { body.innerHTML = html; })
+        .catch(function() { body.innerHTML = '<tr><td colspan="2" class="text-center text-muted py-3">加载失败，请重试</td></tr>'; });
+}
+function delDataItem(type, id, btn) {
+    if (!confirm('确定删除这条记录？删除后不可恢复。')) return;
+    fetch('/data/item/delete', {method:'POST',
+        headers:{'Content-Type':'application/x-www-form-urlencoded','X-Requested-With':'XMLHttpRequest','X-CSRF-Token': cmCsrfToken()},
+        body:'type=' + encodeURIComponent(type) + '&id=' + id})
+        .then(function(r) { return r.json(); })
+        .then(function(j) {
+            if (j.ok) {
+                var tr = btn.closest('tr');
+                if (tr) tr.remove();
+            } else { alert(j.error || '删除失败'); }
+        })
+        .catch(function() { alert('删除失败，请重试'); });
+}
+function clearDataType(type, label) {
+    if (!confirm('确定清空当前学期全部「' + label + '」记录？此操作不可撤销，其他数据不受影响。')) return;
+    if (!confirm('再次确认：清空「' + label + '」？建议先备份。')) return;
+    fetch('/data/clear', {method:'POST',
+        headers:{'Content-Type':'application/x-www-form-urlencoded','X-Requested-With':'XMLHttpRequest','X-CSRF-Token': cmCsrfToken()},
+        body:'type=' + encodeURIComponent(type)})
+        .then(function(r) { if (r.ok) { location.reload(); } else { alert('清空失败'); } })
+        .catch(function() { alert('清空失败，请重试'); });
+}
+</script>
 {% endblock %}
