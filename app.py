@@ -1273,7 +1273,7 @@ def data_clear():
 
 
 @app.route('/data/items')
-@login_required
+@admin_required
 def data_items():
     """单条删除列表（HTML 片段）：当前学期该类型记录，最多 200 条"""
     ttype = request.args.get('type', '')
@@ -1856,6 +1856,7 @@ def index():
         stats['orders_draft'] = OrderPlan.query.filter_by(semester_id=sid, status='draft').count()
         stats['issues'] = BookIssue.query.filter_by(semester_id=sid).count()
         stats['holidays'] = Holiday.query.filter_by(semester_id=sid).count()
+        stats['school_days'] = SchoolDay.query.filter_by(semester_id=sid).count()
         stats['overtimes'] = Overtime.query.filter_by(semester_id=sid).count()
         stats['fees'] = ManagementFee.query.filter_by(semester_id=sid).count()
         stats['ot_amount'] = round(sum((x.amount or 0) for x in Overtime.query.filter_by(semester_id=sid).all()), 2)
@@ -2080,7 +2081,8 @@ def semester_delete(sid):
         return redirect(url_for('index'))
     # 级联删除所有关联数据（子→父顺序）
     for m in (ScheduleCell, TeachingTask, BookIssue, OrderPlan, NightShift,
-              LeaveRequest, Overtime, ManagementFee, Holiday, SchoolDay):
+              LeaveRequest, Overtime, ManagementFee, Holiday, SchoolDay,
+              Payment, BookStockLog):
         m.query.filter_by(semester_id=sid).delete()
     ClassInfo.query.filter_by(semester_id=sid).delete()
     Teacher.query.filter_by(semester_id=sid).delete()
@@ -3382,8 +3384,7 @@ def leaves_stats():
 @login_required
 def standards_page():
     positions = PositionStandard.query.order_by(PositionStandard.weekly_std_hours.desc()).all()
-    coefs = CourseCoefficient.query.order_by(CourseCoefficient.id).all()
-    return render_template('standards.html', positions=positions, coefs=coefs)
+    return render_template('standards.html', positions=positions)
 
 
 @app.route('/standards/position/add', methods=['POST'])
@@ -3432,57 +3433,6 @@ def standards_position_delete(pid):
         flash('记录不存在')
         return redirect(url_for('standards_page'))
     db.session.delete(p)
-    db.session.commit()
-    flash('已删除')
-    return redirect(url_for('standards_page'))
-
-
-@app.route('/standards/coef/add', methods=['POST'])
-@admin_required
-def standards_coef_add():
-    category = request.form.get('category', '').strip()
-    if not category:
-        flash('类别名称不能为空')
-        return redirect(url_for('standards_page'))
-    if CourseCoefficient.query.filter_by(category=category).first():
-        flash('该类别已存在')
-        return redirect(url_for('standards_page'))
-    try:
-        coef = float(request.form.get('coefficient', 1.0) or 1.0)
-    except Exception:
-        coef = 1.0
-    db.session.add(CourseCoefficient(category=category, coefficient=coef,
-                                     note=request.form.get('note', '').strip()))
-    db.session.commit()
-    flash('学科系数已添加')
-    return redirect(url_for('standards_page'))
-
-
-@app.route('/standards/coef/<int:cid>/edit', methods=['POST'])
-@admin_required
-def standards_coef_edit(cid):
-    c = db.session.get(CourseCoefficient, cid)
-    if not c:
-        flash('记录不存在')
-        return redirect(url_for('standards_page'))
-    try:
-        c.coefficient = float(request.form.get('coefficient', c.coefficient))
-    except Exception:
-        pass
-    c.note = request.form.get('note', '').strip()
-    db.session.commit()
-    flash('系数已更新')
-    return redirect(url_for('standards_page'))
-
-
-@app.route('/standards/coef/<int:cid>/delete', methods=['POST'])
-@admin_required
-def standards_coef_delete(cid):
-    c = db.session.get(CourseCoefficient, cid)
-    if not c:
-        flash('记录不存在')
-        return redirect(url_for('standards_page'))
-    db.session.delete(c)
     db.session.commit()
     flash('已删除')
     return redirect(url_for('standards_page'))
@@ -3588,15 +3538,6 @@ def school_days_delete(sdid):
     return redirect(url_for('holidays_page'))
 
 
-def coefficient_of_course(course_id):
-    """课程类别对应的课时系数，找不到返回 1.0"""
-    c = db.session.get(Course, course_id) if course_id else None
-    if not c:
-        return 1.0
-    co = CourseCoefficient.query.filter_by(category=c.category).first()
-    return co.coefficient if co and co.coefficient else 1.0
-
-
 def position_std_hours(position):
     p = PositionStandard.query.filter_by(position=position).first()
     return p.weekly_std_hours if p else 12.0
@@ -3683,7 +3624,11 @@ def _period_weeks(sem):
     while d <= sem.end_date:
         span = (d - base).days + 1
         if span % 28 == 0 or d == sem.end_date:
-            eff = int(((d - p_start).days // 7) + 1)
+            if not res and d == sem.end_date:
+                # 超短学期（不足 28 天）：唯一周期 = 整学期，eff 对齐 effective_weeks
+                eff = sem.effective_weeks()
+            else:
+                eff = int(((d - p_start).days // 7) + 1)
             res.append((pno, p_start, d, eff))
             pno += 1
             p_start = d + timedelta(days=1)
@@ -3801,18 +3746,18 @@ def workload_export():
     ws.append([f'{school} 超课时统计表'])
     ws.append([f'学期：{sem.name if sem else ""}    有效教学周数：{weeks}    超课时单价：{get_setting_float("extra_hour_unit_price", 0)} 元/节'])
     ws.append([])
-    ws.append(['教师', '职务', '学科类别', '周课时(课表)', '系数折算周课时', '有效周数',
+    ws.append(['教师', '职务', '学科类别', '周课时(课表)', '有效周数',
                '学期实际课时', '请假扣减', '职务周标准', '标准课时', '超课时', '金额(元)'])
     for r in rows:
         ws.append([r['teacher'].name, r['teacher'].position, r['teacher'].subject_category,
-                   r['weekly_raw'], r['weekly_coef'], r['weeks'], r['actual'],
+                   r['weekly_raw'], r['weeks'], r['actual'],
                    r['leave_periods'], r['std_weekly'], r['std_total'], r['extra'], r['amount']])
-    ws.append(['合计', '', '', '', '', '', '', '', '', '',
+    ws.append(['合计', '', '', '', '', '', '', '', '',
                round(sum(r['extra'] for r in rows), 2), round(sum(r['amount'] for r in rows), 2)])
     _apply_uniform_style(ws, header_row=4)
     for c in ws[ws.max_row]:
         c.font = Font(name='宋体', size=11, bold=True)
-    for col, w in zip('ABCDEFGHIJKL', [10, 12, 10, 12, 13, 9, 12, 10, 10, 10, 9, 10]):
+    for col, w in zip('ABCDEFGHIJK', [10, 12, 10, 12, 9, 12, 10, 10, 10, 9, 10]):
         ws.column_dimensions[col].width = w
     bio = io.BytesIO()
     wb.save(bio)
@@ -4652,9 +4597,9 @@ def reports_export():
     # 明细 sheet：超课时
     wl, weeks = workload_rows(sid)
     ws2 = wb.create_sheet('超课时明细')
-    ws2.append(['教师', '职务', '周课时', '折算周课时', '学期实际', '标准课时', '超课时', '金额'])
+    ws2.append(['教师', '职务', '周课时', '学期实际', '标准课时', '超课时', '金额'])
     for r in wl:
-        ws2.append([r['teacher'].name, r['teacher'].position, r['weekly_raw'], r['weekly_coef'],
+        ws2.append([r['teacher'].name, r['teacher'].position, r['weekly_raw'],
                     r['actual'], r['std_total'], r['extra'], r['amount']])
     _apply_uniform_style(ws2, header_row=1)
     # 明细 sheet：看课记录

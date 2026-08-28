@@ -48,7 +48,7 @@
 
 <h6 class="text-muted mt-3 mb-2" style="font-size:13px"><i class="fas fa-chart-pie"></i> 当前学期数据统计</h6>
 <div class="row g-2 mb-3">
-    {% for label, key in [('班级','classes'),('教师','teachers'),('课程','courses'),('教室','rooms'),('教材','textbooks'),('教学任务','tasks'),('课表格子','cells'),('征订','orders'),('发书','issues'),('调课','leaves'),('夜自习','night'),('加班','overtimes'),('管理费','fees'),('操作日志','logs')] %}
+    {% for label, key in [('班级','classes'),('教师','teachers'),('课程','courses'),('教室','rooms'),('教材','textbooks'),('教学任务','tasks'),('课表格子','cells'),('征订','orders'),('发书','issues'),('调课','leaves'),('夜自习','night'),('加班','overtimes'),('管理费','fees'),('停课日','holidays'),('上课日','school_days'),('补助发放','payments'),('操作日志','logs')] %}
     <div class="col-3 col-md-2 col-xl-1">
         <div class="card stat-card text-center h-100">
             <div class="number" style="font-size:18px;color:#007aff">{{ stats[key] }}</div>

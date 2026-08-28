@@ -9,5 +9,5 @@
 {% endfor %}
 <tr><td colspan="2" class="text-center text-muted py-1" style="font-size:12px">共 {{ total }} 条（最多显示 200 条，如需清理更多请用「清空」）</td></tr>
 {% else %}
-<tr><td colspan="2" class="text-center text-muted py-3">当前学期暂无记录</td></tr>
+<tr><td colspan="2" class="text-center text-muted py-3">{% if ttype == 'logs' %}暂无操作日志{% else %}当前学期暂无记录{% endif %}</td></tr>
 {% endif %}
