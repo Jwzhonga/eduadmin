@@ -2274,7 +2274,10 @@ def textbooks_page():
 @admin_required
 def textbooks_add():
     name = request.form.get('name', '').strip()
+    is_ajax = request.headers.get('X-Requested-With') == 'XMLHttpRequest'
     if not name:
+        if is_ajax:
+            return jsonify({'ok': False, 'error': '教材名称不能为空'})
         flash('教材名称不能为空')
         return redirect(request.referrer or url_for('textbooks_page'))
     try:
@@ -2291,6 +2294,8 @@ def textbooks_add():
                  stock=stock, remark=request.form.get('remark', '').strip())
     db.session.add(t)
     db.session.commit()
+    if is_ajax:
+        return jsonify({'ok': True, 'id': t.id, 'name': t.name, 'price': t.price})
     flash('教材已添加')
     return redirect(url_for('textbooks_page'))
 
@@ -2377,6 +2382,13 @@ def orders_page():
     q = OrderPlan.query.filter_by(semester_id=sid)
     major = request.args.get('major', '').strip()
     s_no = request.args.get('semester_no', '').strip()
+    cat = request.args.get('cat', '').strip()
+    if cat == 'culture':
+        # 文化课：无专业（全校各班）
+        q = q.filter((OrderPlan.major == '') | (OrderPlan.major.is_(None)))
+    elif cat == 'major':
+        # 专业课：有专业归属
+        q = q.filter(OrderPlan.major != '')
     if major:
         q = q.filter(OrderPlan.major == major)
     if s_no.isdigit():
@@ -2388,7 +2400,7 @@ def orders_page():
     majors = [x[0] for x in db.session.query(OrderPlan.major).distinct().all() if x[0]]
     return render_template('orders.html', rows=rows, courses=courses,
                            textbooks=textbooks, classes=classes, major=major,
-                           s_no=s_no, majors=majors)
+                           s_no=s_no, majors=majors, cat=cat)
 
 @app.route('/orders/add', methods=['POST'])
 @admin_required
@@ -2408,11 +2420,24 @@ def orders_add():
         return redirect(url_for('orders_page'))
     if not unit_price:
         unit_price = tb.price
+    # 图书类别：culture=文化课（全校各班）/ major=专业课（按专业）
+    book_type = request.form.get('book_type', 'culture')
+    major = request.form.get('major', '').strip()
+    class_id = request.form.get('class_id', '').strip()
+    if book_type == 'major':
+        if not major:
+            flash('专业课征订必须填写专业')
+            return redirect(request.referrer or url_for('orders_page'))
+        class_id = int(class_id) if class_id.isdigit() else None
+    else:
+        # 文化课：每个班级都有 → 不指定专业、范围=全校
+        major = ''
+        class_id = None
     o = OrderPlan(semester_id=get_current_semester_id(),
                   course_id=int(request.form.get('course_id') or 0) or None,
                   textbook_id=tb.id,
-                  class_id=int(request.form.get('class_id') or 0) or None,
-                  major=request.form.get('major', '').strip(),
+                  class_id=class_id,
+                  major=major,
                   semester_no=int(request.form.get('semester_no') or 1) or 1,
                   quantity=quantity, unit_price=unit_price,
                   remark=request.form.get('remark', '').strip())
@@ -2547,11 +2572,16 @@ def issues_delete(iid):
 @app.route('/orders/export')
 @login_required
 def orders_export():
-    """订书计划导出：空=全部专业，major 指定=分专业导出"""
+    """订书计划导出：空=全部专业，major 指定=分专业导出；cat=culture/major 按图书类别"""
     sid = get_current_semester_id()
     major = request.args.get('major', '').strip()
     s_no = request.args.get('semester_no', '').strip()
+    cat = request.args.get('cat', '').strip()
     q = OrderPlan.query.filter_by(semester_id=sid)
+    if cat == 'culture':
+        q = q.filter((OrderPlan.major == '') | (OrderPlan.major.is_(None)))
+    elif cat == 'major':
+        q = q.filter(OrderPlan.major != '')
     if major:
         q = q.filter(OrderPlan.major == major)
     if s_no.isdigit():
@@ -2560,13 +2590,13 @@ def orders_export():
     data = []
     for r in rows:
         tb = db.session.get(Textbook, r.textbook_id)
-        data.append([r.major or '', r.semester_no or 1, tb.name if tb else '',
+        data.append(['专业课' if r.major else '文化课', r.major or '', r.semester_no or 1, tb.name if tb else '',
                      course_name(r.course_id) if r.course_id else '',
                      class_name(r.class_id) if r.class_id else '全校/按课程',
                      r.quantity, round(r.unit_price or 0, 2), round((r.quantity or 0) * (r.unit_price or 0), 2),
                      {'draft': '草稿', 'approved': '已审核', 'arrived': '已到货'}.get(r.status, r.status),
                      r.remark or ''])
-    bio = _export_workbook([('订书计划', ['专业', '学期', '教材', '适用课程', '征订范围',
+    bio = _export_workbook([('订书计划', ['类别', '专业', '学期', '教材', '适用课程', '征订范围',
                                         '数量', '单价(元)', '金额(元)', '状态', '备注'], data)])
     fname = '订书计划%s.xlsx' % ('_%s' % major if major else '')
     return send_file(bio, as_attachment=True, download_name=fname,
@@ -3698,11 +3728,27 @@ def _norm_cname(s):
 
 
 def _match_class(sid, cname):
-    """夜自习安排表班级名 → 系统班级（精确 → 去20前缀 → 关键词包含，均规范化比较）"""
+    """夜自习安排表班级名 → 系统班级（精确 → 规范化相等 → 去年份前缀相等 → 关键词包含，均规范化比较）"""
     cname = (cname or '').strip()
     if not cname:
         return None
     nc = _norm_cname(cname)
+
+    def year_of(s):
+        """班级名前缀年份：'2025供用电焊接班'/'25供用电焊接班' → '2025'，无年份 → ''"""
+        m = re.match(r'^20(\d{2})', s or '')
+        if m:
+            return '20' + m.group(1)
+        m = re.match(r'^(\d{2})', s or '')
+        return '20' + m.group(1) if m else ''
+
+    def strip_year(s):
+        """去掉前缀年份（4 位优先，其次 2 位）：'2025汽车运用班'/'25汽车运用班' → '汽车运用班'"""
+        s2 = re.sub(r'^20\d{2}', '', s or '')
+        if s2 != s:
+            return s2
+        return re.sub(r'^\d{2}', '', s or '')
+
     cand = ClassInfo.query.filter_by(semester_id=sid, name=cname).first()
     if cand:
         return cand
@@ -3713,12 +3759,17 @@ def _match_class(sid, cname):
     for c in ClassInfo.query.filter_by(semester_id=sid).all():
         if _norm_cname(c.name) == c2:
             return c
-    base = re.sub(r'^20\d{2}', '', nc)
+    base = strip_year(nc)
     best = None
     best_len = -1
+    y1 = year_of(nc)
     for c in ClassInfo.query.filter_by(semester_id=sid).all():
-        cb = re.sub(r'^\d{2}', '', _norm_cname(c.name))
+        cb = strip_year(_norm_cname(c.name))
         if cb and (cb in base or base in cb):
+            # 年份一致性：双方都带年份且不同 → 不匹配（2025汽车应用班 ≠ 2024汽车应用班）
+            y2 = year_of(_norm_cname(c.name))
+            if y1 and y2 and y1 != y2:
+                continue
             if len(cb) > best_len:
                 best = c
                 best_len = len(cb)
@@ -3816,9 +3867,11 @@ def night_import_do():
                 continue
             cls = _match_class(sid, cname)
             if not cls:
-                skipped += 1
-                notes.append('未匹配班级「%s」' % cname)
-                continue
+                # 班级库不存在 → 自动创建班级（年级按年份前缀推断），避免整班数据丢失
+                cls = ClassInfo(semester_id=sid, name=cname, grade=_infer_grade(cname))
+                db.session.add(cls)
+                db.session.flush()
+                notes.append('自动创建班级「%s」' % cname)
             for k, dci in enumerate(day_cols):
                 tname = vals[dci] if dci < len(vals) else ''
                 if not tname:
@@ -3876,8 +3929,9 @@ def night_day_clear():
 @app.route('/night/batch_save', methods=['POST'])
 @admin_required
 def night_batch_save():
-    """批量保存夜自习排班修改：changes=[{date, class_id, teacher_id}...]
-    已有记录（日期+班级）则更新教师，无则创建；teacher_id 为空表示删除该记录"""
+    """批量保存夜自习统计修改：changes=[{date, class_id, teacher_id?, status?}...]
+    已有记录（日期+班级）则按传入字段更新，无则创建；teacher_id 为空/缺省表示删除该记录；
+    status 仅当显式传入（scheduled/confirmed/absent）时更新，不再强制重置为 scheduled"""
     sid = get_current_semester_id()
     try:
         data = request.get_json(silent=True) or {}
@@ -3889,6 +3943,7 @@ def night_batch_save():
         d = str(ch.get('date', '')).strip()
         cid = ch.get('class_id')
         tid = ch.get('teacher_id')
+        status = ch.get('status')
         if not d or not cid:
             continue
         try:
@@ -3896,24 +3951,34 @@ def night_batch_save():
             cid = int(cid)
         except Exception:
             continue
+        if status is not None and status not in ('scheduled', 'confirmed', 'absent'):
+            status = None
+        tid_empty = tid is None or str(tid).strip() == '' or str(tid).strip() == '0'
         rec = NightShift.query.filter_by(semester_id=sid, shift_date=dt, class_id=cid).first()
-        if tid is None or tid == '' or int(tid or 0) <= 0:
+        if tid_empty:
             # 清空该格：删除记录
             if rec:
                 db.session.delete(rec)
                 saved += 1
             continue
         try:
-            tid = int(tid)
+            tid = int(tid or 0)
         except Exception:
             continue
         if rec:
-            rec.teacher_id = tid
-            rec.status = 'scheduled'
+            changed = False
+            if 'teacher_id' in ch and rec.teacher_id != tid:
+                rec.teacher_id = tid
+                changed = True
+            if status and rec.status != status:
+                rec.status = status
+                changed = True
+            if changed:
+                saved += 1
         else:
             db.session.add(NightShift(semester_id=sid, shift_date=dt, class_id=cid,
-                                      teacher_id=tid, status='scheduled'))
-        saved += 1
+                                      teacher_id=tid, status=status or 'scheduled'))
+            saved += 1
     db.session.commit()
     return jsonify({'ok': True, 'saved': saved})
 
@@ -3950,6 +4015,14 @@ def night_stats():
     for r in rows:
         grid.setdefault(r.class_id, {})[r.shift_date] = r
     class_ids = sorted(grid.keys(), key=_class_room_sort_key)
+    # 整日不排标记：该日期有记录且全部为 absent（软标记不删数据，可随时恢复）
+    day_recs = {}
+    for r in rows:
+        day_recs.setdefault(r.shift_date, []).append(r)
+    days_off = {}
+    for d in days:
+        recs = day_recs.get(d, [])
+        days_off[d] = bool(recs) and all(x.status == 'absent' for x in recs)
     # 周统计：每位教师本周节数
     week_stat = {}
     for r in rows:
@@ -3992,7 +4065,7 @@ def night_stats():
                            start=start, prev_start=prev_start, next_start=next_start,
                            week_no=week_no, teachers=teachers,
                            week_stat=week_stat, periods_info=periods_info,
-                           period_nos=period_nos, unit=unit,
+                           period_nos=period_nos, unit=unit, days_off=days_off,
                            cur_period=_current_period_no(sid))
 
 
@@ -4424,7 +4497,10 @@ def _preview_path():
 
 
 def _infer_grade(name):
-    """班级名称前两位 → 入学年份（'24机电班' → '2024级'）"""
+    """班级名称年份 → 入学年级（'2025供用电焊接班'/'25新能源汽修班' → '2025级'；'24机电班' → '2024级'）"""
+    m = re.match(r'^20(\d{2})', name or '')
+    if m:
+        return '20%s级' % m.group(1)
     m = re.match(r'^(\d{2})', name or '')
     return '20%s级' % m.group(1) if m else ''
 

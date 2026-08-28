@@ -4,6 +4,11 @@
     <h5 class="page-title mb-0"><i class="fas fa-clipboard-list" style="color:#007aff;margin-right:8px"></i> 订书发书</h5>
     <div class="d-flex gap-2 align-items-center flex-wrap">
         <form method="get" action="/orders" class="d-flex gap-1 align-items-center">
+            <select name="cat" class="form-select form-select-sm" style="width:110px" onchange="this.form.submit()">
+                <option value="">全部图书</option>
+                <option value="culture" {% if cat == 'culture' %}selected{% endif %}>文化课</option>
+                <option value="major" {% if cat == 'major' %}selected{% endif %}>专业课</option>
+            </select>
             <select name="major" class="form-select form-select-sm" style="width:130px" onchange="this.form.submit()">
                 <option value="">全部专业</option>
                 {% for m in majors %}<option value="{{ m }}" {% if major == m %}selected{% endif %}>{{ m }}</option>{% endfor %}
@@ -12,11 +17,11 @@
                 <option value="">全部学期</option>
                 {% for i in range(1, 7) %}<option value="{{ i }}" {% if s_no == i|string %}selected{% endif %}>第{{ i }}学期</option>{% endfor %}
             </select>
-            {% if major or s_no %}<a href="/orders" class="btn btn-sm btn-outline-secondary">清除</a>{% endif %}
+            {% if major or s_no or cat %}<a href="/orders" class="btn btn-sm btn-outline-secondary">清除</a>{% endif %}
         </form>
-        <a href="/orders/export?major={{ major }}&semester_no={{ s_no }}" class="btn btn-sm btn-success"><i class="fas fa-file-excel"></i> {% if major %}导出「{{ major }}」{% else %}全部导出{% endif %}</a>
+        <a href="/orders/export?major={{ major }}&semester_no={{ s_no }}&cat={{ cat }}" class="btn btn-sm btn-success"><i class="fas fa-file-excel"></i> {% if major %}导出「{{ major }}」{% else %}全部导出{% endif %}</a>
         {% if current_user and current_user.role == 'admin' %}
-        <button class="btn btn-primary btn-sm" data-bs-toggle="modal" data-bs-target="#addModal"><i class="fas fa-plus"></i> 新建征订</button>
+        <button class="btn btn-primary btn-sm" data-bs-toggle="modal" data-bs-target="#addModal" onclick="bookTypeChange(document.getElementById('bookTypeSel'))"><i class="fas fa-plus"></i> 新建征订</button>
         {% endif %}
     </div>
 </div>
@@ -26,6 +31,7 @@
             <thead>
                 <tr>
                     <th style="width:60px">#</th>
+                    <th style="width:80px">类别</th>
                     <th>教材</th>
                     <th>专业</th>
                     <th>学期</th>
@@ -46,6 +52,7 @@
                 {% set cl = classes | selectattr('id', 'equalto', r.class_id) | first %}
                 <tr>
                     <td>{{ loop.index }}</td>
+                    <td>{% if r.major %}<span class="badge text-bg-info">专业课</span>{% else %}<span class="badge text-bg-secondary">文化课</span>{% endif %}</td>
                     <td>{{ tb.name if tb else '#' ~ r.textbook_id }}</td>
                     <td>{% if r.major %}<span class="badge text-bg-light border">{{ r.major }}</span>{% else %}—{% endif %}</td>
                     <td>{{ r.semester_no or 1 }}</td>
@@ -78,7 +85,7 @@
                     {% endif %}
                 </tr>
                 {% else %}
-                <tr><td colspan="12" class="text-center text-muted py-4">暂无征订计划，点击右上角「新建征订」开始</td></tr>
+                <tr><td colspan="13" class="text-center text-muted py-4">暂无征订计划，点击右上角「新建征订」开始</td></tr>
                 {% endfor %}
             </tbody>
         </table>
@@ -91,8 +98,15 @@
         <form class="modal-content" method="post" action="/orders/add">
             <div class="modal-header"><h6 class="modal-title">新建征订计划</h6><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
             <div class="modal-body">
-                <div class="mb-2"><label class="form-label">专业（按专业统一规划）</label>
-                    <input class="form-control form-control-sm" name="major" list="majorList" placeholder="如：供电 / 机电 / 汽修" value="{{ major }}">
+                <div class="mb-2"><label class="form-label">图书类别</label>
+                    <select class="form-select form-select-sm" name="book_type" id="bookTypeSel" onchange="bookTypeChange(this)">
+                        <option value="culture">文化课（全校各班）</option>
+                        <option value="major">专业课（按专业）</option>
+                    </select>
+                </div>
+                <div class="mb-2" id="majorWrap">
+                    <label class="form-label">专业（专业课必填）</label>
+                    <input class="form-control form-control-sm" name="major" list="majorList" placeholder="如：供电 / 机电 / 汽修">
                     <datalist id="majorList">{% for m in majors %}<option value="{{ m }}">{% endfor %}</datalist>
                 </div>
                 <div class="mb-2"><label class="form-label">学期（1-6）</label>
@@ -100,11 +114,33 @@
                         {% for i in range(1, 7) %}<option value="{{ i }}" {% if s_no == i|string %}selected{% endif %}>第{{ i }}学期</option>{% endfor %}
                     </select>
                 </div>
-                <div class="mb-2"><label class="form-label">教材</label>
-                    <select class="form-select form-select-sm" name="textbook_id" required>
-                        <option value="">— 请选择 —</option>
-                        {% for t in textbooks %}<option value="{{ t.id }}">{{ t.name }}（{{ '%.2f'|format(t.price) }}元）</option>{% endfor %}
-                    </select>
+                <div class="mb-2"><label class="form-label">教材（来自教材库）</label>
+                    <div class="d-flex gap-1">
+                        <select class="form-select form-select-sm" name="textbook_id" id="orderTextbook" required>
+                            <option value="">— 请选择 —</option>
+                            {% for t in textbooks %}<option value="{{ t.id }}" data-price="{{ t.price }}">{{ t.name }}（{{ '%.2f'|format(t.price) }}元）</option>{% endfor %}
+                        </select>
+                        <button type="button" class="btn btn-sm btn-outline-primary text-nowrap" onclick="toggleNewBook()" title="教材库没有则先新建">＋新建</button>
+                    </div>
+                </div>
+                <div id="newBookWrap" class="border rounded p-2 mb-2 d-none" style="background:#fafafa">
+                    <div style="font-size:12px;font-weight:600;margin-bottom:6px"><i class="fas fa-book-medical"></i> 新建教材（保存后自动加入教材库并选中）</div>
+                    <div class="mb-1"><label class="form-label">教材名称</label><input class="form-control form-control-sm" id="nb_name" name="nb_name"></div>
+                    <div class="row g-1">
+                        <div class="col-6 mb-1"><label class="form-label">出版社</label><input class="form-control form-control-sm" id="nb_publisher" name="nb_publisher"></div>
+                        <div class="col-6 mb-1"><label class="form-label">单价</label><input type="number" step="0.01" class="form-control form-control-sm" id="nb_price" name="nb_price" value="0"></div>
+                    </div>
+                    <div class="mb-1"><label class="form-label">ISBN</label><input class="form-control form-control-sm" id="nb_isbn" name="nb_isbn"></div>
+                    <div class="mb-1"><label class="form-label">适用课程</label>
+                        <select class="form-select form-select-sm" id="nb_course_id" name="nb_course_id">
+                            <option value="">（不限）</option>
+                            {% for c in courses %}<option value="{{ c.id }}">{{ c.name }}</option>{% endfor %}
+                        </select>
+                    </div>
+                    <div class="d-flex justify-content-end gap-1 mt-1">
+                        <button type="button" class="btn btn-sm btn-outline-secondary" onclick="toggleNewBook()">取消</button>
+                        <button type="button" class="btn btn-sm btn-primary" onclick="saveNewBook()">保存到教材库</button>
+                    </div>
                 </div>
                 <div class="mb-2"><label class="form-label">适用课程</label>
                     <select class="form-select form-select-sm" name="course_id">
@@ -112,9 +148,9 @@
                         {% for c in courses %}<option value="{{ c.id }}">{{ c.name }}</option>{% endfor %}
                     </select>
                 </div>
-                <div class="mb-2"><label class="form-label">征订范围</label>
-                    <select class="form-select form-select-sm" name="class_id">
-                        <option value="">全校/按课程</option>
+                <div class="mb-2" id="classWrap"><label class="form-label">征订范围（留空=该专业全部班级）</label>
+                    <select class="form-select form-select-sm" name="class_id" id="orderClassSel">
+                        <option value="">全部</option>
                         {% for c in classes %}<option value="{{ c.id }}">{{ c.name }}</option>{% endfor %}
                     </select>
                 </div>
@@ -129,5 +165,76 @@
         </form>
     </div>
 </div>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+{% if current_user and current_user.role == 'admin' %}
+<script>
+function showToast(msg, type) {
+    var t = document.createElement('div');
+    t.style.cssText = 'position:fixed;top:20px;left:50%;transform:translateX(-50%);z-index:99999;padding:10px 20px;border-radius:10px;color:#fff;font-size:14px;box-shadow:0 4px 16px rgba(0,0,0,0.25);';
+    t.style.background = (type === 'danger') ? '#ff3b30' : '#34c759';
+    t.textContent = msg;
+    document.body.appendChild(t);
+    setTimeout(function(){ t.remove(); }, 2500);
+}
+/* ── 图书类别切换：文化课=全校各班（隐藏专业/班级）；专业课=按专业 ── */
+function bookTypeChange(sel) {
+    var isMajor = sel.value === 'major';
+    document.getElementById('majorWrap').style.display = isMajor ? 'block' : 'none';
+    document.getElementById('classWrap').style.display = isMajor ? 'block' : 'none';
+    var majorInput = document.querySelector('input[name="major"]');
+    var classSel = document.getElementById('orderClassSel');
+    if (!isMajor) {
+        majorInput.value = '';
+        classSel.value = '';
+        classSel.disabled = true;
+    } else {
+        classSel.disabled = false;
+    }
+}
+/* ── 内联新建教材：AJAX 提交到教材库，成功后加入下拉并选中 ── */
+function toggleNewBook() {
+    var wrap = document.getElementById('newBookWrap');
+    wrap.classList.toggle('d-none');
+    if (!wrap.classList.contains('d-none')) document.getElementById('nb_name').focus();
+}
+function saveNewBook() {
+    var name = document.getElementById('nb_name').value.trim();
+    if (!name) { alert('教材名称不能为空'); return; }
+    var body = 'name=' + encodeURIComponent(name) +
+        '&isbn=' + encodeURIComponent(document.getElementById('nb_isbn').value.trim()) +
+        '&publisher=' + encodeURIComponent(document.getElementById('nb_publisher').value.trim()) +
+        '&price=' + encodeURIComponent(document.getElementById('nb_price').value || '0') +
+        '&course_id=' + encodeURIComponent(document.getElementById('nb_course_id').value || '') +
+        '&stock=0&remark=';
+    fetch('/textbooks/add', {method:'POST',
+        headers:{'Content-Type':'application/x-www-form-urlencoded','X-CSRF-Token':cmCsrfToken(),'X-Requested-With':'XMLHttpRequest'},
+        body: body})
+        .then(function(r){ return r.json(); })
+        .then(function(j){
+            if (j.ok) {
+                var sel = document.getElementById('orderTextbook');
+                var opt = document.createElement('option');
+                opt.value = j.id;
+                opt.setAttribute('data-price', j.price || 0);
+                opt.textContent = j.name + '（' + (parseFloat(j.price || 0)).toFixed(2) + '元）';
+                sel.appendChild(opt);
+                sel.value = String(j.id);
+                document.getElementById('newBookWrap').classList.add('d-none');
+                document.getElementById('nb_name').value = '';
+                document.getElementById('nb_isbn').value = '';
+                document.getElementById('nb_publisher').value = '';
+                document.getElementById('nb_price').value = '0';
+                document.getElementById('nb_course_id').value = '';
+                showToast('教材「' + j.name + '」已加入教材库');
+            } else {
+                showToast(j.error || '新建失败', 'danger');
+            }
+        })
+        .catch(function(){ showToast('网络错误，请重试', 'danger'); });
+}
+</script>
 {% endif %}
 {% endblock %}

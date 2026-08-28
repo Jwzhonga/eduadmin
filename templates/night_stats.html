@@ -1,5 +1,8 @@
 {% extends "base.html" %}
 {% block content %}
+<style>
+.col-off { background: #fff1f0 !important; }
+</style>
 <div class="d-flex justify-content-between align-items-center mb-2 flex-wrap gap-2">
     <h5 class="page-title mb-0" style="font-size:17px"><i class="fas fa-chart-bar" style="color:#007aff;margin-right:8px"></i> 夜自习统计</h5>
     <div class="d-flex gap-2 align-items-center">
@@ -11,13 +14,15 @@
         </div>
         <a href="/night?start={{ start.strftime('%Y-%m-%d') }}" class="btn btn-sm btn-outline-secondary">排班</a>
         <a href="/night/stats/export?period={{ cur_period }}" class="btn btn-sm btn-success"><i class="fas fa-file-excel"></i> 导出</a>
+        {% if current_user and current_user.role == 'admin' %}
+        <button class="btn btn-sm btn-primary" id="saveNightBtn" onclick="saveAll()" disabled><i class="fas fa-save"></i> 保存修改</button>
+        {% endif %}
     </div>
 </div>
 
 <div class="alert alert-light border p-2 mb-2" style="border-radius:10px;font-size:12px;color:#515154">
     <i class="fas fa-info-circle" style="color:#007aff"></i>
-    按周显示排班，格子<strong>改完即自动保存</strong>；点格旁状态徽章切换（⏳待确认→✅确认→❌缺勤）；某天不上自习点列头 <span class="badge text-bg-danger">×</span>。
-    下方为本周统计与每 4 周周期补助（{{ unit }} 元/节）。
+    按周显示上传的排班表（行=班级，列=星期几），默认星期几就是星期几。特殊日子需要调整时用<strong>列头下拉</strong>：<strong>整日不排</strong>（标记该日不上自习，数据保留可随时恢复）/ <strong>恢复该日排班</strong> / <strong>复制其他日子的老师组合</strong>（如把周一整体换成周日的排班）；也可单独改某格子的老师。所有改动<strong>先修改、最后统一点「保存修改」</strong>生效，不刷新页面。
 </div>
 
 <div class="card mb-3">
@@ -28,12 +33,23 @@
                     <th style="width:56px;padding:4px 6px">教室</th>
                     <th style="padding:4px 6px">班级</th>
                     {% for d in days %}
+                    {% set off = days_off.get(d, False) %}
                     <th class="text-center" style="padding:4px 2px">
-                        周{{ ['日','一','二','三','四'][loop.index0] }}<br>
+                        周{{ ['日','一','二','三','四'][loop.index0] }}
+                        {% if off %}<span class="badge text-bg-danger day-off-badge" style="font-size:9px;vertical-align:1px">不排</span>{% endif %}<br>
                         <span style="font-weight:400;font-size:10px;color:#86868b">{{ d.strftime('%m-%d') }}</span><br>
                         {% if current_user and current_user.role == 'admin' %}
-                        <button class="btn btn-sm btn-outline-danger day-clear" style="padding:0 5px;font-size:10px;line-height:1.4"
-                                data-date="{{ d }}" title="本日不上自习（清空整列）" onclick="clearDay(this)">×</button>
+                        <select class="form-select form-select-sm day-copy" style="width:118px;padding:1px 4px;font-size:11px"
+                                data-date="{{ d }}" onchange="dayCopyChange(this)" title="整日操作：整日不排（标记，可恢复）/ 恢复该日排班 / 复制某天原始排班到这一天，保存时生效">
+                            <option value="">— 整日操作 —</option>
+                            <option value="__off__">整日不排（可恢复）</option>
+                            <option value="__restore__">恢复该日排班</option>
+                            <optgroup label="复制其他日子的老师">
+                                {% for od in days %}{% if od != d %}
+                                <option value="{{ od }}">周{{ ['日','一','二','三','四'][loop.index0] }}（{{ od.strftime('%m-%d') }}）</option>
+                                {% endif %}{% endfor %}
+                            </optgroup>
+                        </select>
                         {% endif %}
                     </th>
                     {% endfor %}
@@ -46,19 +62,15 @@
                     <td style="padding:3px 6px">{{ class_name(cid) }}</td>
                     {% for d in days %}
                     {% set rec = grid.get(cid, {}).get(d) %}
-                    <td class="text-center" style="padding:3px 2px">
+                    <td class="text-center {% if days_off.get(d) %}col-off{% endif %}" style="padding:3px 2px">
                         <div class="d-inline-flex align-items-center gap-1">
-                            <select class="form-select form-select-sm night-sel" style="width:96px;padding:1px 4px;font-size:12px"
+                            <select class="form-select form-select-sm night-sel" style="width:92px;padding:1px 4px;font-size:12px"
                                     data-date="{{ d }}" data-class="{{ cid }}" data-rid="{{ rec.id if rec else '' }}"
-                                    data-orig="{{ rec.teacher_id if rec else '' }}" onchange="saveCell(this)">
+                                    data-orig="{{ rec.teacher_id if rec else '' }}"
+                                    data-status="{{ rec.status if rec else 'scheduled' }}" onchange="markChanged(this)">
                                 <option value="">—</option>
                                 {% for t in teachers %}<option value="{{ t.id }}" {% if rec and rec.teacher_id == t.id %}selected{% endif %}>{{ t.name }}</option>{% endfor %}
                             </select>
-                            {% if rec %}
-                            <span class="st-badge" style="cursor:pointer;font-size:10px;white-space:nowrap" title="点击切换状态"
-                                  onclick="toggleStatus({{ rec.id }}, this)"
-                                  data-status="{{ rec.status }}">{% if rec.status == 'confirmed' %}✅{% elif rec.status == 'absent' %}❌{% else %}⏳{% endif %}</span>
-                            {% endif %}
                         </div>
                     </td>
                     {% endfor %}
@@ -116,53 +128,166 @@
 </div>
 
 <script>
-function saveCell(sel) {
-    var tid = sel.value, orig = sel.dataset.orig || '', rid = sel.dataset.rid;
-    if (tid === orig) return;
-    sel.disabled = true;
-    var url = '', body = '';
-    if (tid) {
-        if (rid) { url = '/night/' + rid + '/edit'; body = 'teacher_id=' + tid; }
-        else { url = '/night/add'; body = 'shift_date=' + sel.dataset.date + '&class_id=' + sel.dataset.class + '&teacher_id=' + tid; }
-    } else {
-        if (rid) { url = '/night/' + rid + '/delete'; body = ''; }
-        else { sel.disabled = false; return; }
+/* ── 夜自习统计：先修改、统一保存（不做每次 reload）── */
+var pendingChanges = {};   // key 'date|class' -> {date, class_id, teacher_id}
+var saveBtn = document.getElementById('saveNightBtn');
+
+function cellKey(tSel) { return tSel.dataset.date + '|' + tSel.dataset.class; }
+
+function markChanged(sel) {
+    var key = cellKey(sel);
+    var orig = sel.dataset.orig || '';
+    var prev = pendingChanges[key];
+    if (!prev) {
+        if (sel.value === orig) { updateSaveBar(); return; }
+        prev = {date: sel.dataset.date, class_id: sel.dataset.class};
+        pendingChanges[key] = prev;
     }
-    fetch(url, {method:'POST',
-        headers:{'Content-Type':'application/x-www-form-urlencoded','X-CSRF-Token':cmCsrfToken(),'X-Requested-With':'XMLHttpRequest'},
-        body: body})
+    prev.teacher_id = sel.value;          // 只更新教师，保留已有 status（如整日不排标记）
+    reconcileCell(sel);                   // 与服务器一致则撤销
+    sel.style.borderColor = pendingChanges[key] ? '#ff9500' : '';
+    updateSaveBar();
+}
+
+/* 整日操作：__off__=整日不排（软标记 absent，数据保留可恢复）；__restore__=恢复该日排班；
+   选某天=把整列老师组合复制为那天的原始排班（按班级一一对应）；执行后下拉复位 */
+function dayCopyChange(sel) {
+    var d = sel.dataset.date;
+    var val = sel.value;
+    var changed = 0;
+    var label = '';
+    if (val === '__off__') {
+        label = '整日不排（标记）';
+        document.querySelectorAll('.night-sel[data-date="' + d + '"]').forEach(function(tSel) {
+            if (!tSel.value) return;                     // 无排班的格子无需标记
+            var key = cellKey(tSel);
+            mergeStatus(key, d, tSel.dataset.class, tSel.value, 'absent');
+            reconcileCell(tSel);                          // 本来就是不排 → 撤销空修改
+            if (pendingChanges[key]) changed++;
+        });
+        setColOff(d, true);
+    } else if (val === '__restore__') {
+        label = '恢复该日排班';
+        document.querySelectorAll('.night-sel[data-date="' + d + '"]').forEach(function(tSel) {
+            var key = cellKey(tSel);
+            var rid = tSel.dataset.rid;
+            if (!tSel.value && !rid) return;             // 无排班且无记录
+            if (tSel.value) {
+                mergeStatus(key, d, tSel.dataset.class, tSel.value, 'scheduled');
+            } else {
+                // 有记录但下拉无值（原老师已不存在）→ 保留服务器原教师，只恢复状态
+                pendingChanges[key] = {date: d, class_id: tSel.dataset.class,
+                                       teacher_id: tSel.dataset.orig || ''};
+            }
+            reconcileCell(tSel);
+            if (pendingChanges[key]) changed++;
+        });
+        setColOff(d, false);
+    } else if (val) {
+        var opt = sel.options[sel.selectedIndex];
+        label = '复制自 ' + opt.textContent;
+        document.querySelectorAll('.night-sel[data-date="' + d + '"]').forEach(function(tSel) {
+            var cid = tSel.dataset.class;
+            var src = document.querySelector('.night-sel[data-date="' + val + '"][data-class="' + cid + '"]');
+            // 用源日期的服务器原始排班（data-orig），不受本地未保存修改（如整日不排）影响
+            var v = src ? (src.dataset.orig || '') : '';
+            if (tSel.value !== v) {
+                tSel.value = v;
+                markChanged(tSel);
+                changed++;
+            }
+        });
+    }
+    sel.value = '';   // 复位为占位项，避免下拉停留
+    if (changed > 0 || val) {
+        showToast((label ? label + '：' : '') + '已应用 ' + changed + ' 个班级（点「保存修改」生效）');
+    }
+    updateSaveBar();
+}
+
+/* 把 status 合并进 (date|class) 对应的 change；无则新建 */
+function mergeStatus(key, d, cid, tid, status) {
+    if (!pendingChanges[key]) {
+        pendingChanges[key] = {date: d, class_id: cid, teacher_id: tid};
+    }
+    pendingChanges[key].status = status;
+}
+
+/* 若某格最终意图（change 值）与服务器原状一致，撤销该格的修改 */
+function reconcileCell(tSel) {
+    var key = cellKey(tSel);
+    var origT = tSel.dataset.orig || '';
+    var origS = tSel.dataset.status || 'scheduled';
+    var ch = pendingChanges[key];
+    if (!ch) return;
+    var t = ch.teacher_id !== undefined ? ch.teacher_id : tSel.value;
+    var s = ch.status || origS;
+    if (t === origT && s === origS) {
+        delete pendingChanges[key];
+        tSel.style.borderColor = '';
+    }
+}
+
+/* 整列视觉：淡红背景 + 列头「不排」徽章（仅作用于排班表，不波及下方统计表） */
+function setColOff(d, off) {
+    var th = document.querySelector('.day-copy[data-date="' + d + '"]').closest('th');
+    if (!th) return;
+    var badge = th.querySelector('.day-off-badge');
+    if (off) {
+        if (!badge) {
+            badge = document.createElement('span');
+            badge.className = 'badge text-bg-danger day-off-badge';
+            badge.textContent = '不排';
+            badge.style.cssText = 'font-size:9px;vertical-align:1px;margin-left:2px';
+            th.insertBefore(badge, th.querySelector('br'));
+        }
+    } else if (badge) {
+        badge.remove();
+    }
+    var col = th.cellIndex;
+    th.closest('table').querySelectorAll('tbody tr').forEach(function(tr) {
+        var td = tr.cells[col];
+        if (td) td.classList.toggle('col-off', off);
+    });
+}
+
+function updateSaveBar() {
+    if (!saveBtn) return;
+    var n = Object.keys(pendingChanges).length;
+    saveBtn.disabled = (n === 0);
+    saveBtn.classList.toggle('btn-danger', n > 0);
+    saveBtn.classList.toggle('btn-primary', n === 0);
+    saveBtn.innerHTML = n ? '<i class="fas fa-save"></i> 保存修改（' + n + '）' : '<i class="fas fa-save"></i> 保存修改';
+}
+
+function showToast(msg, type) {
+    var t = document.createElement('div');
+    t.style.cssText = 'position:fixed;top:20px;left:50%;transform:translateX(-50%);z-index:99999;padding:10px 20px;border-radius:10px;color:#fff;font-size:14px;box-shadow:0 4px 16px rgba(0,0,0,0.25);';
+    t.style.background = (type === 'danger') ? '#ff3b30' : '#34c759';
+    t.textContent = msg;
+    document.body.appendChild(t);
+    setTimeout(function(){ t.remove(); }, 2500);
+}
+
+function saveAll() {
+    if (!saveBtn || saveBtn.disabled) return;
+    var changes = Object.keys(pendingChanges).map(function(k){ return pendingChanges[k]; });
+    saveBtn.disabled = true;
+    fetch('/night/batch_save', {method:'POST',
+        headers:{'Content-Type':'application/json','X-CSRF-Token':cmCsrfToken(),'X-Requested-With':'XMLHttpRequest'},
+        body: JSON.stringify({changes: changes})})
         .then(function(r){return r.json();})
         .then(function(j){
-            sel.disabled = false;
             if (j.ok) {
-                sel.dataset.orig = tid;
-                sel.dataset.rid = j.id || rid || '';
-                sel.style.borderColor = '#34c759';
-                setTimeout(function(){sel.style.borderColor='';}, 1200);
-                location.reload();
-            } else { alert(j.error || '保存失败'); }
+                pendingChanges = {};
+                showToast('已保存 ' + (j.saved || 0) + ' 处修改');
+                setTimeout(function(){ location.reload(); }, 700);
+            } else {
+                saveBtn.disabled = false;
+                alert(j.error || '保存失败');
+            }
         })
-        .catch(function(){sel.disabled = false; alert('网络错误');});
-}
-function clearDay(btn) {
-    var d = btn.dataset.date;
-    if (!confirm('确定 ' + d + ' 整日不上自习？将清空该日全部排班。')) return;
-    fetch('/night/day_clear', {method:'POST',
-        headers:{'Content-Type':'application/x-www-form-urlencoded','X-CSRF-Token':cmCsrfToken(),'X-Requested-With':'XMLHttpRequest'},
-        body: 'date=' + d})
-        .then(function(r){return r.json();})
-        .then(function(j){ if (j.ok) location.reload(); else alert(j.error||'失败'); })
-        .catch(function(){alert('网络错误');});
-}
-function toggleStatus(rid, el) {
-    var map = {'scheduled':'confirmed', 'confirmed':'absent', 'absent':'scheduled'};
-    var next = map[el.dataset.status] || 'confirmed';
-    fetch('/night/' + rid + '/edit', {method:'POST',
-        headers:{'Content-Type':'application/x-www-form-urlencoded','X-CSRF-Token':cmCsrfToken(),'X-Requested-With':'XMLHttpRequest'},
-        body: 'status=' + next})
-        .then(function(r){return r.json();})
-        .then(function(j){ if (j.ok) location.reload(); else alert(j.error||'失败'); })
-        .catch(function(){alert('网络错误');});
+        .catch(function(){ saveBtn.disabled = false; alert('网络错误，请重试'); });
 }
 </script>
 {% endblock %}
