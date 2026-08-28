@@ -128,8 +128,8 @@
 
 <div class="alert alert-light border mt-3" style="border-radius:12px;font-size:13px;color:#515154">
     <i class="fas fa-info-circle" style="color:#007aff"></i>
-    <strong>计算口径：</strong>教师学期实际课时 = Σ(课表周课时 × 课程类别系数) × 有效教学周数 − 请假扣减；
+    <strong>计算口径：</strong>教师学期实际课时 = 课表周课时 × 有效教学周数 − 请假扣减（上一节算一节，无学科系数）；
     标准课时 = 职务周标准 × 有效教学周数；超课时 = 实际 − 标准（超过部分），再 × 超课时单价 = 金额。
-    有效教学周数 = 学期工作日 − 停课日（可在「停课日管理」添加，或学期管理中手动指定）。
+    有效教学周数按自然周计算（恒为整数），放假停课也按整周计；可在「停课/上课日」添加记录，或学期管理中手动指定。
 </div>
 {% endblock %}
