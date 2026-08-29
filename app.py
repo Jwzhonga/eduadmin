@@ -521,6 +521,7 @@ class OrderPlan(db.Model):
     class_id = db.Column(db.Integer, db.ForeignKey('class_info.id'), nullable=True)  # 空=全校/按课程
     major = db.Column(db.String(32), default='')      # 专业（如 供电/机电/汽修）
     semester_no = db.Column(db.Integer, default=1)    # 学期序数（1-6）
+    book_type = db.Column(db.String(16), default='culture')  # culture=文化课（全校各班）/ major=专业课
     quantity = db.Column(db.Integer, default=0)
     unit_price = db.Column(db.Float, default=0)          # 成交单价（默认取教材库价格）
     status = db.Column(db.String(16), default='draft')   # draft/approved/arrived
@@ -2558,16 +2559,16 @@ def orders_page():
     s_no = request.args.get('semester_no', '').strip()
     cat = request.args.get('cat', '').strip()
     if cat == 'culture':
-        # 文化课：无专业（全校各班）
-        q = q.filter((OrderPlan.major == '') | (OrderPlan.major.is_(None)))
+        # 文化课：book_type=culture（无专业，全校各班）；NULL 兜底按文化课
+        q = q.filter((OrderPlan.book_type == 'culture') | (OrderPlan.book_type.is_(None)))
     elif cat == 'major':
-        # 专业课：有专业归属
-        q = q.filter(OrderPlan.major != '')
+        # 专业课：book_type=major
+        q = q.filter(OrderPlan.book_type == 'major')
     if major:
         q = q.filter(OrderPlan.major == major)
     if s_no.isdigit():
         q = q.filter(OrderPlan.semester_no == int(s_no))
-    rows = q.order_by(OrderPlan.major, OrderPlan.semester_no, OrderPlan.created_at.desc()).all()
+    rows = q.order_by(OrderPlan.book_type, OrderPlan.major, OrderPlan.semester_no, OrderPlan.created_at.desc()).all()
     courses = sem_filter(Course.query).order_by(Course.name).all()
     textbooks = sem_filter(Textbook.query).order_by(Textbook.name).all()
     classes = sem_filter(ClassInfo.query).order_by(ClassInfo.name).all()
@@ -2613,6 +2614,7 @@ def orders_add():
                   class_id=class_id,
                   major=major,
                   semester_no=int(request.form.get('semester_no') or 1) or 1,
+                  book_type=book_type,
                   quantity=quantity, unit_price=unit_price,
                   remark=request.form.get('remark', '').strip())
     db.session.add(o)
@@ -2634,6 +2636,46 @@ def orders_status(oid):
         flash('状态已更新')
     return redirect(url_for('orders_page'))
 
+@app.route('/orders/edit', methods=['POST'])
+@admin_required
+def orders_edit():
+    """编辑征订计划：数量/单价/备注/专业/学期/类别可改；教材不可换"""
+    oid = request.form.get('oid', '').strip()
+    if not oid.isdigit():
+        flash('参数错误')
+        return redirect(url_for('orders_page'))
+    o = db.session.get(OrderPlan, int(oid))
+    if not o:
+        flash('计划不存在')
+        return redirect(url_for('orders_page'))
+    try:
+        quantity = int(request.form.get('quantity', 0) or 0)
+        unit_price = float(request.form.get('unit_price', 0) or 0)
+    except Exception:
+        quantity, unit_price = 0, 0
+    book_type = request.form.get('book_type', 'culture')
+    major = request.form.get('major', '').strip()
+    class_id = request.form.get('class_id', '').strip()
+    if book_type == 'major':
+        # 专业课：major 可为空（全校统一用书单，导入场景）
+        class_id = int(class_id) if class_id.isdigit() else None
+    else:
+        major = ''
+        class_id = None
+    o.book_type = book_type
+    o.major = major
+    o.class_id = class_id
+    try:
+        o.semester_no = int(request.form.get('semester_no') or 1) or 1
+    except Exception:
+        o.semester_no = 1
+    o.quantity = max(0, quantity)
+    o.unit_price = unit_price
+    o.remark = request.form.get('remark', '').strip()
+    db.session.commit()
+    flash('征订计划已更新')
+    return redirect(url_for('orders_page'))
+
 @app.route('/orders/<int:oid>/delete', methods=['POST'])
 @admin_required
 def orders_delete(oid):
@@ -2644,6 +2686,98 @@ def orders_delete(oid):
     db.session.delete(o)
     db.session.commit()
     flash('征订计划已删除')
+    return redirect(url_for('orders_page'))
+
+@app.route('/orders/import', methods=['POST'])
+@admin_required
+def orders_import():
+    """导入学生用书单 Excel：自动建教材（ISBN 去重）+ 自动建征订计划（重复跳过）"""
+    files = request.files.getlist('files')
+    if not files:
+        flash('请选择要上传的用书单 Excel 文件')
+        return redirect(url_for('orders_page'))
+    sid = get_current_semester_id()
+    if not sid:
+        flash('请先在「学期管理」中创建当前学期')
+        return redirect(url_for('orders_page'))
+    CN_NUM = {'一': 1, '二': 2, '三': 3, '四': 4, '五': 5, '六': 6}
+    def _sem_from_text(txt):
+        m = re.search(r'第\s*([一二三四五六1-6])\s*学期', txt or '')
+        if not m:
+            return None
+        g = m.group(1)
+        if g in CN_NUM:
+            return CN_NUM[g]
+        return int(g)
+
+    stats = {'textbook_new': 0, 'textbook_reuse': 0, 'order_new': 0, 'order_skip': 0, 'files': 0, 'items': 0}
+    try:
+        for f in files:
+            if not f or not f.filename:
+                continue
+            ext = f.filename.rsplit('.', 1)[-1].lower() if '.' in f.filename else ''
+            if ext != 'xlsx':
+                flash(f'「{f.filename}」不是 .xlsx 文件，已跳过（仅支持 xlsx）')
+                continue
+            path = os.path.join(IMPORT_TMP, 'imp_%s_%s.xlsx' % (int(time.time()), uuid.uuid4().hex[:6]))
+            f.save(path)
+            try:
+                parsed = import_parser.parse_book_order(path)
+            except Exception as e:
+                flash(f'「{f.filename}」解析失败：{e}')
+                try:
+                    os.remove(path)
+                except Exception:
+                    pass
+                continue
+            os.remove(path)
+            if not parsed['items']:
+                flash(f'「{f.filename}」未识别到有效数据（需含「序号/出版社/书号/书名」表头行）')
+                continue
+            # 学期序数：优先标题里的「第X学期」，其次文件名（每文件独立）
+            semester_no = _sem_from_text(parsed.get('title')) or _sem_from_text(f.filename) or 1
+            stats['files'] += 1
+            stats['items'] += len(parsed['items'])
+            book_type = parsed['category']
+            for it in parsed['items']:
+                # 教材去重：优先 ISBN（同学期）；无 ISBN 按 出版社+书名
+                tb = None
+                if it['isbn']:
+                    tb = Textbook.query.filter_by(semester_id=sid, isbn=it['isbn']).first()
+                if tb is None and it['name']:
+                    q = Textbook.query.filter_by(semester_id=sid, name=it['name'])
+                    if it['publisher']:
+                        q = q.filter_by(publisher=it['publisher'])
+                    tb = q.first()
+                if tb is None:
+                    tb = Textbook(semester_id=sid, name=it['name'], isbn=it['isbn'],
+                                  publisher=it['publisher'], author=it['author'],
+                                  price=it['price'], stock=0)
+                    db.session.add(tb)
+                    db.session.flush()
+                    stats['textbook_new'] += 1
+                else:
+                    stats['textbook_reuse'] += 1
+                # 征订去重：同学期+同教材+同类别+同学期序数+全校统一(major='') → 跳过
+                dup = OrderPlan.query.filter_by(semester_id=sid, textbook_id=tb.id,
+                                                book_type=book_type, semester_no=semester_no,
+                                                major='').first()
+                if dup:
+                    stats['order_skip'] += 1
+                    continue
+                db.session.add(OrderPlan(semester_id=sid, textbook_id=tb.id, major='',
+                                         semester_no=semester_no, book_type=book_type,
+                                         quantity=it['quantity'], unit_price=it['price'],
+                                         remark='用书单导入'))
+                stats['order_new'] += 1
+        db.session.commit()
+    except Exception as e:
+        db.session.rollback()
+        flash(f'导入失败（已回滚，未写入任何数据）：{e}')
+        return redirect(url_for('orders_page'))
+    flash(f'导入完成：{stats["files"]} 个文件 / {stats["items"]} 条教材，'
+          f'新增教材 {stats["textbook_new"]} 本，复用 {stats["textbook_reuse"]} 本，'
+          f'新建征订 {stats["order_new"]} 条，跳过重复 {stats["order_skip"]} 条')
     return redirect(url_for('orders_page'))
 
 @app.route('/issues')
@@ -2753,18 +2887,18 @@ def orders_export():
     cat = request.args.get('cat', '').strip()
     q = OrderPlan.query.filter_by(semester_id=sid)
     if cat == 'culture':
-        q = q.filter((OrderPlan.major == '') | (OrderPlan.major.is_(None)))
+        q = q.filter((OrderPlan.book_type == 'culture') | (OrderPlan.book_type.is_(None)))
     elif cat == 'major':
-        q = q.filter(OrderPlan.major != '')
+        q = q.filter(OrderPlan.book_type == 'major')
     if major:
         q = q.filter(OrderPlan.major == major)
     if s_no.isdigit():
         q = q.filter(OrderPlan.semester_no == int(s_no))
-    rows = q.order_by(OrderPlan.major, OrderPlan.semester_no).all()
+    rows = q.order_by(OrderPlan.book_type, OrderPlan.major, OrderPlan.semester_no).all()
     data = []
     for r in rows:
         tb = db.session.get(Textbook, r.textbook_id)
-        data.append(['专业课' if r.major else '文化课', r.major or '', r.semester_no or 1, tb.name if tb else '',
+        data.append(['专业课' if (r.book_type or 'culture') == 'major' else '文化课', r.major or '', r.semester_no or 1, tb.name if tb else '',
                      course_name(r.course_id) if r.course_id else '',
                      class_name(r.class_id) if r.class_id else '全校/按课程',
                      r.quantity, round(r.unit_price or 0, 2), round((r.quantity or 0) * (r.unit_price or 0), 2),
@@ -5005,6 +5139,15 @@ def _run_db_migrations():
             pass
         try:
             cur.execute('ALTER TABLE order_plan ADD COLUMN semester_no INTEGER DEFAULT 1')
+        except Exception:
+            pass  # 已存在
+        try:
+            cur.execute('ALTER TABLE order_plan ADD COLUMN book_type VARCHAR(16) DEFAULT "culture"')
+        except Exception:
+            pass  # 已存在
+        try:
+            # 旧数据回填：major 有值的旧记录 → 专业课
+            cur.execute("UPDATE order_plan SET book_type='major' WHERE major != '' AND major IS NOT NULL")
         except Exception:
             pass
         conn.commit()

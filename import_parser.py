@@ -165,3 +165,93 @@ def parse_teacher_schedule(filepath):
         if cells:
             result[sn] = cells
     return result
+
+
+def parse_book_order(filepath):
+    """学生用书单（订书发书）→ {'category': 'culture'|'major', 'title': str, 'items': [...]}
+
+    结构：标题行(任意列) → 表头行(序号/出版社/书号/书名/单价/数量/作者/合计) → 数据行
+    item: {publisher, isbn, name, price, quantity, author}
+    - 类别判定：标题含「文化」→culture（文化课）；含「专业」→major（专业课）；否则默认 culture
+    - ISBN 单元格可能是数字类型（如 9787830028350）→ 统一转字符串
+    - 数量为空 → 0；教学参考书（无书号无单价）也导入
+    """
+    import openpyxl
+    wb = openpyxl.load_workbook(filepath, data_only=True)
+    ws = wb[wb.sheetnames[0]]
+    title = ''
+    for row in ws.iter_rows(min_row=1, max_row=5, values_only=True):
+        for v in row:
+            if v is not None and str(v).strip():
+                title = str(v).strip()
+                break
+        if title:
+            break
+    category = 'major' if '专业' in title else ('culture' if '文化' in title else 'culture')
+    # 定位表头行（含「序号」与「出版社」）
+    header_row = None
+    for ri, row in enumerate(ws.iter_rows(values_only=True), 1):
+        cells = [str(v).strip() if v is not None else '' for v in row]
+        if any('序号' in c for c in cells) and any('出版社' in c for c in cells):
+            header_row = ri
+            break
+    if not header_row:
+        return {'category': category, 'title': title, 'items': []}
+    # 列映射（按表头特征匹配：书号/书名/单价/数量/作者/出版社/序号）
+    hdr = [str(v).strip() if v is not None else '' for v in
+           next(ws.iter_rows(min_row=header_row, max_row=header_row, values_only=True))]
+    col = {}
+    for key, pred in (
+        ('seq', lambda h: '序号' in h),
+        ('isbn', lambda h: '号' in h and '书' in h),
+        ('name', lambda h: '名' in h and '书' in h),
+        ('price', lambda h: '价' in h),
+        ('qty', lambda h: '量' in h),
+        ('author', lambda h: '作' in h and '者' in h),
+        ('publisher', lambda h: '出版' in h),
+    ):
+        for i, h in enumerate(hdr):
+            if pred(h):
+                col[key] = i
+                break
+    items = []
+    for row in ws.iter_rows(min_row=header_row + 1, values_only=True):
+        def _gv(k):
+            i = col.get(k)
+            return row[i] if i is not None and i < len(row) else None
+        # 数据行以数字序号开头（兼容 int / float 1.0 / 字符串）；遇「大写/合计/日期」等停止
+        seq_v = _gv('seq')
+        try:
+            seq_n = int(float(seq_v or 0))
+        except (TypeError, ValueError):
+            continue
+        if seq_n < 1:
+            continue
+        isbn_v = _gv('isbn')
+        if isinstance(isbn_v, float) and isbn_v.is_integer():
+            isbn = str(int(isbn_v))
+        elif isinstance(isbn_v, int):
+            isbn = str(isbn_v)
+        else:
+            isbn = str(isbn_v).strip() if isbn_v is not None else ''
+        name_v, author_v = _gv('name'), _gv('author')
+        name = re.sub(r'\s+', ' ', str(name_v).strip()) if name_v is not None else ''
+        author = re.sub(r'\s+', ' ', str(author_v).strip()) if author_v is not None else ''
+        # 价格：剥货币符号/单位后解析，非负
+        price_v = _gv('price')
+        try:
+            price = round(max(0, float(re.sub(r'[^\d.+-]', '', str(price_v or '')) or 0)), 2)
+        except (TypeError, ValueError):
+            price = 0
+        qty_v = _gv('qty')
+        try:
+            qty = max(0, int(float(qty_v or 0)))
+        except (TypeError, ValueError):
+            qty = 0
+        publisher_v = _gv('publisher')
+        publisher = str(publisher_v).strip() if publisher_v is not None else ''
+        if not name and not isbn:
+            continue  # 空行
+        items.append({'publisher': publisher, 'isbn': isbn, 'name': name,
+                      'price': price, 'quantity': qty, 'author': author})
+    return {'category': category, 'title': title, 'items': items}

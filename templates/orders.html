@@ -22,6 +22,7 @@
         <a href="/orders/export?major={{ major }}&semester_no={{ s_no }}&cat={{ cat }}" class="btn btn-sm btn-success"><i class="fas fa-file-excel"></i> {% if major %}导出「{{ major }}」{% else %}全部导出{% endif %}</a>
         {% if current_user and current_user.role == 'admin' %}
         <button class="btn btn-primary btn-sm" data-bs-toggle="modal" data-bs-target="#addModal" onclick="bookTypeChange(document.getElementById('bookTypeSel'))"><i class="fas fa-plus"></i> 新建征订</button>
+        <button class="btn btn-outline-primary btn-sm" data-bs-toggle="modal" data-bs-target="#importModal" title="导入学生用书单 Excel（自动建教材+征订）"><i class="fas fa-file-import"></i> 导入用书单</button>
         {% endif %}
     </div>
 </div>
@@ -50,11 +51,13 @@
                 {% set tb = textbooks | selectattr('id', 'equalto', r.textbook_id) | first %}
                 {% set cs = courses | selectattr('id', 'equalto', r.course_id) | first %}
                 {% set cl = classes | selectattr('id', 'equalto', r.class_id) | first %}
-                <tr>
+                <tr data-oid="{{ r.id }}" data-book-type="{{ r.book_type or 'culture' }}" data-major="{{ r.major or '' }}"
+                    data-semester-no="{{ r.semester_no or 1 }}" data-quantity="{{ r.quantity }}"
+                    data-unit-price="{{ r.unit_price }}" data-remark="{{ r.remark or '' }}" data-class-id="{{ r.class_id or '' }}">
                     <td>{{ loop.index }}</td>
-                    <td>{% if r.major %}<span class="badge text-bg-info">专业课</span>{% else %}<span class="badge text-bg-secondary">文化课</span>{% endif %}</td>
+                    <td>{% if (r.book_type or 'culture') == 'major' %}<span class="badge text-bg-info">专业课</span>{% else %}<span class="badge text-bg-secondary">文化课</span>{% endif %}</td>
                     <td>{{ tb.name if tb else '#' ~ r.textbook_id }}</td>
-                    <td>{% if r.major %}<span class="badge text-bg-light border">{{ r.major }}</span>{% else %}—{% endif %}</td>
+                    <td>{% if r.major %}<span class="badge text-bg-light border">{{ r.major }}</span>{% else %}{% if (r.book_type or 'culture') == 'major' %}<span class="text-muted">全校统一</span>{% else %}—{% endif %}{% endif %}</td>
                     <td>{{ r.semester_no or 1 }}</td>
                     <td>{{ cs.name if cs else '—' }}</td>
                     <td>{{ cl.name if cl else '全校/按课程' }}</td>
@@ -80,6 +83,7 @@
                             <button class="btn btn-sm btn-outline-success" title="标记到货">到货</button>
                         </form>
                         {% endif %}
+                        <button class="btn btn-sm btn-outline-primary" onclick="openEditModal(this)" title="编辑数量/单价/专业等"><i class="fas fa-edit"></i></button>
                         <button class="btn btn-sm btn-outline-danger" onclick="postDelete('/orders/{{ r.id }}/delete','确定删除该征订计划？')"><i class="fas fa-trash"></i></button>
                     </td>
                     {% endif %}
@@ -165,6 +169,71 @@
         </form>
     </div>
 </div>
+
+<div class="modal fade" id="importModal" tabindex="-1">
+    <div class="modal-dialog modal-sm">
+        <form class="modal-content" method="post" action="/orders/import" enctype="multipart/form-data">
+            <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
+            <div class="modal-header"><h6 class="modal-title">导入学生用书单</h6><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+            <div class="modal-body">
+                <div class="mb-2 text-muted" style="font-size:12px">
+                    支持「文化课/专业课用书单」Excel（.xlsx，含 序号/出版社/书号/书名 表头）。
+                    标题含「专业」→专业课，含「文化」→文化课。自动建教材（ISBN 去重）+ 征订（重复跳过）。
+                </div>
+                <div class="mb-2"><label class="form-label">用书单文件（可多选）</label>
+                    <input type="file" class="form-control form-control-sm" name="files" multiple accept=".xlsx" required>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-sm btn-secondary" data-bs-dismiss="modal">取消</button>
+                <button type="submit" class="btn btn-sm btn-primary">导入</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<div class="modal fade" id="editModal" tabindex="-1">
+    <div class="modal-dialog modal-sm">
+        <form class="modal-content" method="post" action="/orders/edit">
+            <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
+            <input type="hidden" name="oid" id="editOid">
+            <div class="modal-header"><h6 class="modal-title">编辑征订计划</h6><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+            <div class="modal-body">
+                <div class="mb-2"><label class="form-label">教材</label>
+                    <div class="form-control form-control-sm bg-light" id="editBookName" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap"></div>
+                </div>
+                <div class="mb-2"><label class="form-label">图书类别</label>
+                    <select class="form-select form-select-sm" name="book_type" id="editBookTypeSel" onchange="editBookTypeChange(this)">
+                        <option value="culture">文化课（全校各班）</option>
+                        <option value="major">专业课（按专业）</option>
+                    </select>
+                </div>
+                <div class="mb-2" id="editMajorWrap">
+                    <label class="form-label">专业（留空=全校统一专业课）</label>
+                    <input class="form-control form-control-sm" name="major" id="editMajor" list="majorList" placeholder="如：供电 / 机电 / 汽修">
+                </div>
+                <div class="mb-2"><label class="form-label">学期（1-6）</label>
+                    <select class="form-select form-select-sm" name="semester_no" id="editSemesterNo">
+                        {% for i in range(1, 7) %}<option value="{{ i }}">第{{ i }}学期</option>{% endfor %}
+                    </select>
+                </div>
+                <div class="mb-2" id="editClassWrap"><label class="form-label">征订范围（留空=该专业全部班级）</label>
+                    <select class="form-select form-select-sm" name="class_id" id="editClassSel">
+                        <option value="">全部</option>
+                        {% for c in classes %}<option value="{{ c.id }}">{{ c.name }}</option>{% endfor %}
+                    </select>
+                </div>
+                <div class="mb-2"><label class="form-label">数量</label><input type="number" class="form-control form-control-sm" name="quantity" id="editQuantity" value="0" required></div>
+                <div class="mb-2"><label class="form-label">单价(元)</label><input type="number" step="0.01" class="form-control form-control-sm" name="unit_price" id="editUnitPrice" value="0"></div>
+                <div class="mb-2"><label class="form-label">备注</label><input class="form-control form-control-sm" name="remark" id="editRemark"></div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-sm btn-secondary" data-bs-dismiss="modal">取消</button>
+                <button type="submit" class="btn btn-sm btn-primary">保存</button>
+            </div>
+        </form>
+    </div>
+</div>
 {% endif %}
 {% endblock %}
 
@@ -234,6 +303,35 @@ function saveNewBook() {
             }
         })
         .catch(function(){ showToast('网络错误，请重试', 'danger'); });
+}
+/* ── 编辑征订计划：从行 data 属性填充 modal ── */
+function openEditModal(btn) {
+    var tr = btn.closest('tr');
+    document.getElementById('editOid').value = tr.getAttribute('data-oid');
+    document.getElementById('editBookName').textContent = tr.children[2].textContent.trim();
+    var bt = tr.getAttribute('data-book-type') || 'culture';
+    document.getElementById('editBookTypeSel').value = bt;
+    document.getElementById('editMajor').value = tr.getAttribute('data-major') || '';
+    document.getElementById('editSemesterNo').value = tr.getAttribute('data-semester-no') || '1';
+    document.getElementById('editQuantity').value = tr.getAttribute('data-quantity') || '0';
+    document.getElementById('editUnitPrice').value = tr.getAttribute('data-unit-price') || '0';
+    document.getElementById('editRemark').value = tr.getAttribute('data-remark') || '';
+    document.getElementById('editClassSel').value = tr.getAttribute('data-class-id') || '';
+    editBookTypeChange(document.getElementById('editBookTypeSel'));
+    new bootstrap.Modal(document.getElementById('editModal')).show();
+}
+function editBookTypeChange(sel) {
+    var isMajor = sel.value === 'major';
+    document.getElementById('editMajorWrap').style.display = isMajor ? 'block' : 'none';
+    document.getElementById('editClassWrap').style.display = isMajor ? 'block' : 'none';
+    var classSel = document.getElementById('editClassSel');
+    if (!isMajor) {
+        document.getElementById('editMajor').value = '';
+        classSel.value = '';
+        classSel.disabled = true;
+    } else {
+        classSel.disabled = false;
+    }
 }
 </script>
 {% endif %}
