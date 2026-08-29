@@ -168,13 +168,18 @@ def parse_teacher_schedule(filepath):
 
 
 def parse_book_order(filepath):
-    """学生用书单（订书发书）→ {'category': 'culture'|'major', 'title': str, 'items': [...]}
+    """学生用书单（订书发书）→ 自动检测两种格式
 
-    结构：标题行(任意列) → 表头行(序号/出版社/书号/书名/单价/数量/作者/合计) → 数据行
-    item: {publisher, isbn, name, price, quantity, author}
-    - 类别判定：标题含「文化」→culture（文化课）；含「专业」→major（专业课）；否则默认 culture
-    - ISBN 单元格可能是数字类型（如 9787830028350）→ 统一转字符串
-    - 数量为空 → 0；教学参考书（无书号无单价）也导入
+    A. 通用用书单（单 sheet，表头含「出版社」）→ {'mode':'general', 'category', 'title', 'items'}
+       item: {publisher, isbn, name, price, quantity, author}
+       - 类别判定：标题含「专业」→major（专业课）；含「文化」→culture（文化课）；否则默认 culture
+       - ISBN 单元格可能是数字类型（如 9787830028350）→ 统一转字符串
+       - 数量为空 → 0；教学参考书（无书号无单价）也导入
+
+    B. 班级用书单（每班一个 sheet，表头 序号/书名/数量/单价，无出版社）→
+       {'mode':'class', 'sheets': [{'title', 'grade', 'class_name', 'semester_no', 'items'}]}
+       item: {name, price, quantity}
+       - 标题格式「XX级XX班第X学期用书单」→ grade=年级(24/25/26)、class_name=班级名(机电班)、semester_no
     """
     import openpyxl
     wb = openpyxl.load_workbook(filepath, data_only=True)
@@ -187,18 +192,39 @@ def parse_book_order(filepath):
                 break
         if title:
             break
-    category = 'major' if '专业' in title else ('culture' if '文化' in title else 'culture')
-    # 定位表头行（含「序号」与「出版社」）
+    # 检测表头：含「出版社」→ 通用格式；仅「序号/书名」→ 班级格式（单元格去空格后匹配）
     header_row = None
     for ri, row in enumerate(ws.iter_rows(values_only=True), 1):
-        cells = [str(v).strip() if v is not None else '' for v in row]
+        cells = [re.sub(r'\s+', '', str(v)) if v is not None else '' for v in row]
+        if any('序号' in c for c in cells) and any('书名' in c for c in cells):
+            header_row = ri
+            break
+    if header_row:
+        hdr = [re.sub(r'\s+', '', str(v)) if v is not None else '' for v in
+               next(ws.iter_rows(min_row=header_row, max_row=header_row, values_only=True))]
+        if any('出版社' in h or '出版' in h for h in hdr):
+            return _parse_book_order_general(wb, ws, title)
+    # 班级格式：遍历所有 sheet
+    sheets = []
+    for sn in wb.sheetnames:
+        s = _parse_book_order_class_sheet(wb[sn])
+        if s:
+            sheets.append(s)
+    return {'mode': 'class', 'title': title, 'sheets': sheets}
+
+
+def _parse_book_order_general(wb, ws, title):
+    """通用用书单解析（单 sheet，表头含出版社/书号/书名/单价/数量/作者）"""
+    category = 'major' if '专业' in title else ('culture' if '文化' in title else 'culture')
+    header_row = None
+    for ri, row in enumerate(ws.iter_rows(values_only=True), 1):
+        cells = [re.sub(r'\s+', '', str(v)) if v is not None else '' for v in row]
         if any('序号' in c for c in cells) and any('出版社' in c for c in cells):
             header_row = ri
             break
     if not header_row:
-        return {'category': category, 'title': title, 'items': []}
-    # 列映射（按表头特征匹配：书号/书名/单价/数量/作者/出版社/序号）
-    hdr = [str(v).strip() if v is not None else '' for v in
+        return {'mode': 'general', 'category': category, 'title': title, 'items': []}
+    hdr = [re.sub(r'\s+', '', str(v)) if v is not None else '' for v in
            next(ws.iter_rows(min_row=header_row, max_row=header_row, values_only=True))]
     col = {}
     for key, pred in (
@@ -219,7 +245,6 @@ def parse_book_order(filepath):
         def _gv(k):
             i = col.get(k)
             return row[i] if i is not None and i < len(row) else None
-        # 数据行以数字序号开头（兼容 int / float 1.0 / 字符串）；遇「大写/合计/日期」等停止
         seq_v = _gv('seq')
         try:
             seq_n = int(float(seq_v or 0))
@@ -237,7 +262,6 @@ def parse_book_order(filepath):
         name_v, author_v = _gv('name'), _gv('author')
         name = re.sub(r'\s+', ' ', str(name_v).strip()) if name_v is not None else ''
         author = re.sub(r'\s+', ' ', str(author_v).strip()) if author_v is not None else ''
-        # 价格：剥货币符号/单位后解析，非负
         price_v = _gv('price')
         try:
             price = round(max(0, float(re.sub(r'[^\d.+-]', '', str(price_v or '')) or 0)), 2)
@@ -251,7 +275,59 @@ def parse_book_order(filepath):
         publisher_v = _gv('publisher')
         publisher = str(publisher_v).strip() if publisher_v is not None else ''
         if not name and not isbn:
-            continue  # 空行
+            continue
         items.append({'publisher': publisher, 'isbn': isbn, 'name': name,
                       'price': price, 'quantity': qty, 'author': author})
-    return {'category': category, 'title': title, 'items': items}
+    return {'mode': 'general', 'category': category, 'title': title, 'items': items}
+
+
+def _parse_book_order_class_sheet(ws):
+    """班级用书单单个 sheet：标题「XX级XX班第X学期用书单」+ 表头(序号/书名/数量/单价)"""
+    title = ''
+    for row in ws.iter_rows(min_row=1, max_row=3, values_only=True):
+        for v in row:
+            if v is not None and str(v).strip():
+                title = str(v).strip()
+                break
+        if title:
+            break
+    m = re.search(r'(\d{2})级(.+?)班第([一二三四五六])学期', title)
+    if not m:
+        return None
+    sem_map = {'一': 1, '二': 2, '三': 3, '四': 4, '五': 5, '六': 6}
+    grade, class_name, sem_cn = m.group(1), m.group(2), m.group(3)
+    header_row = None
+    for ri, row in enumerate(ws.iter_rows(values_only=True), 1):
+        cells = [re.sub(r'\s+', '', str(v)) if v is not None else '' for v in row]
+        if any('序号' in c for c in cells) and any('书名' in c for c in cells):
+            header_row = ri
+            break
+    if not header_row:
+        return None
+    items = []
+    for row in ws.iter_rows(min_row=header_row + 1, values_only=True):
+        seq = row[0] if row and row[0] is not None else None
+        try:
+            sn = int(float(seq))
+        except (TypeError, ValueError):
+            continue
+        if sn < 1:
+            continue
+        name = str(row[1]).strip() if len(row) > 1 and row[1] is not None else ''
+        if not name:
+            continue
+        price_v = row[3] if len(row) > 3 and row[3] is not None else 0
+        try:
+            price = round(max(0, float(re.sub(r'[^\d.+-]', '', str(price_v or 0)) or 0)), 2)
+        except (TypeError, ValueError):
+            price = 0
+        qty_v = row[2] if len(row) > 2 and row[2] is not None else 0
+        try:
+            qty = max(0, int(float(qty_v or 0)))
+        except (TypeError, ValueError):
+            qty = 0
+        items.append({'name': name, 'price': price, 'quantity': qty})
+    if not items:
+        return None
+    return {'title': title, 'grade': grade, 'class_name': class_name,
+            'semester_no': sem_map.get(sem_cn, 1), 'items': items}

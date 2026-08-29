@@ -2691,7 +2691,10 @@ def orders_delete(oid):
 @app.route('/orders/import', methods=['POST'])
 @admin_required
 def orders_import():
-    """导入学生用书单 Excel：自动建教材（ISBN 去重）+ 自动建征订计划（重复跳过）"""
+    """导入学生用书单 Excel：自动建教材 + 自动建征订计划（重复跳过）
+    支持两种格式：
+    A. 通用用书单（表头含出版社）：标题判 文化/专业 类别，全校统一（major=''）
+    B. 班级用书单（每班一 sheet，无出版社）：按班级挂征订，专业从班名推断，书名关键词判类别"""
     files = request.files.getlist('files')
     if not files:
         flash('请选择要上传的用书单 Excel 文件')
@@ -2709,8 +2712,32 @@ def orders_import():
         if g in CN_NUM:
             return CN_NUM[g]
         return int(g)
+    # 班级匹配：用书单班级名 → 同年级系统班级（关键词逐级回退）
+    CLASS_KEYWORDS = [['新能源汽车'], ['新能源'], ['汽车运用'], ['计算机平面'], ['计算机应用'],
+                      ['数字媒体'], ['机电'], ['供电'], ['焊接']]
+    def _match_classes(grade, class_name):
+        norm = class_name.replace('级', '').replace('班', '').strip()
+        for level in CLASS_KEYWORDS:
+            for k in level:
+                if k in norm or k in class_name:
+                    hits = ClassInfo.query.filter_by(semester_id=sid).filter(
+                        ClassInfo.name.like(grade + '%'), ClassInfo.name.contains(k)).all()
+                    if hits:
+                        return hits
+        return []
+    # 书名关键词判类别：文化课 → culture；其余 → major
+    CULTURE_KW = ['语文', '数学', '英语', '思想政治', '中国特色社会主义', '中国历史', '历史', '信息技术',
+                  '公共艺术', '美术', '音乐', '劳动教育', '物理', '化学', '生物', '体育', '哲学', '职业道德', '心理健康']
+    def _book_type_by_name(name):
+        return 'culture' if any(k in name for k in CULTURE_KW) else 'major'
+    # 从班级名推断专业：24机电1班 → 机电；25新能源汽车班 → 新能源汽车
+    def _major_from_class(name):
+        base = re.sub(r'^\d{2}|班$', '', name).strip()
+        m = re.match(r'^(.+?)\d*$', base)
+        return m.group(1) if m else base
 
-    stats = {'textbook_new': 0, 'textbook_reuse': 0, 'order_new': 0, 'order_skip': 0, 'files': 0, 'items': 0}
+    stats = {'textbook_new': 0, 'textbook_reuse': 0, 'order_new': 0, 'order_skip': 0,
+             'files': 0, 'items': 0, 'class_sheets': 0, 'no_match_classes': []}
     try:
         for f in files:
             if not f or not f.filename:
@@ -2731,10 +2758,51 @@ def orders_import():
                     pass
                 continue
             os.remove(path)
-            if not parsed['items']:
+            if parsed.get('mode') == 'class':
+                # ── B. 班级用书单：每 sheet 一个班 ──
+                if not parsed['sheets']:
+                    flash(f'「{f.filename}」未识别到有效数据（需含「序号/书名」表头行和「XX级XX班第X学期」标题）')
+                    continue
+                stats['files'] += 1
+                stats['class_sheets'] += len(parsed['sheets'])
+                for sh in parsed['sheets']:
+                    classes = _match_classes(sh['grade'], sh['class_name'])
+                    if not classes:
+                        stats['no_match_classes'].append(sh['title'])
+                        flash(f'「{f.filename}」中「{sh["title"]}」未匹配到系统班级，已跳过')
+                        continue
+                    sem_no = sh['semester_no']
+                    for it in sh['items']:
+                        stats['items'] += 1
+                        # 教材去重：同学期按书名（无 ISBN/出版社）
+                        tb = Textbook.query.filter_by(semester_id=sid, name=it['name']).first()
+                        if tb is None:
+                            tb = Textbook(semester_id=sid, name=it['name'], isbn='',
+                                          publisher='', author='', price=it['price'], stock=0)
+                            db.session.add(tb)
+                            db.session.flush()
+                            stats['textbook_new'] += 1
+                        else:
+                            stats['textbook_reuse'] += 1
+                        btype = _book_type_by_name(it['name'])
+                        for cls in classes:
+                            major = _major_from_class(cls.name)
+                            dup = OrderPlan.query.filter_by(semester_id=sid, textbook_id=tb.id,
+                                                            class_id=cls.id, semester_no=sem_no).first()
+                            if dup:
+                                stats['order_skip'] += 1
+                                continue
+                            db.session.add(OrderPlan(semester_id=sid, textbook_id=tb.id,
+                                                     class_id=cls.id, major=major,
+                                                     semester_no=sem_no, book_type=btype,
+                                                     quantity=it['quantity'], unit_price=it['price'],
+                                                     remark='班级用书单导入'))
+                            stats['order_new'] += 1
+                continue
+            # ── A. 通用用书单：全校统一 ──
+            if not parsed.get('items'):
                 flash(f'「{f.filename}」未识别到有效数据（需含「序号/出版社/书号/书名」表头行）')
                 continue
-            # 学期序数：优先标题里的「第X学期」，其次文件名（每文件独立）
             semester_no = _sem_from_text(parsed.get('title')) or _sem_from_text(f.filename) or 1
             stats['files'] += 1
             stats['items'] += len(parsed['items'])
@@ -2775,9 +2843,14 @@ def orders_import():
         db.session.rollback()
         flash(f'导入失败（已回滚，未写入任何数据）：{e}')
         return redirect(url_for('orders_page'))
-    flash(f'导入完成：{stats["files"]} 个文件 / {stats["items"]} 条教材，'
-          f'新增教材 {stats["textbook_new"]} 本，复用 {stats["textbook_reuse"]} 本，'
-          f'新建征订 {stats["order_new"]} 条，跳过重复 {stats["order_skip"]} 条')
+    msg = (f'导入完成：{stats["files"]} 个文件 / {stats["items"]} 条教材，'
+           f'新增教材 {stats["textbook_new"]} 本，复用 {stats["textbook_reuse"]} 本，'
+           f'新建征订 {stats["order_new"]} 条，跳过重复 {stats["order_skip"]} 条')
+    if stats['class_sheets']:
+        msg += f'；班级用书单 {stats["class_sheets"]} 个班'
+    if stats['no_match_classes']:
+        msg += f'；未匹配班级 {len(stats["no_match_classes"])} 个（{"、".join(stats["no_match_classes"][:3])}）'
+    flash(msg)
     return redirect(url_for('orders_page'))
 
 @app.route('/issues')
