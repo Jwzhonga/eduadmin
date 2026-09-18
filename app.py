@@ -1738,6 +1738,8 @@ def _rmb_upper(amount):
         while integer > 0:
             section = integer % 10000
             integer //= 10000
+            higher = integer > 0          # 上面还有更高的一节
+            sec_val = section
             section_str = ''
             zero_flag = False
             pos = 0
@@ -1752,6 +1754,10 @@ def _rmb_upper(amount):
                     zero_flag = False
                 section //= 10
                 pos += 1
+            # 本节不足四位（千位为 0）且上面还有更高节 → 必须补一个「零」
+            # 例：10110 → 壹万零壹佰壹拾（原实现漏零，写成「壹万壹佰壹拾」不合财务规范）
+            if section_str and higher and sec_val < 1000 and not section_str.startswith('零'):
+                section_str = '零' + section_str
             if big_idx > 0 and section_str:
                 section_str += big_units[big_idx]
             elif big_idx > 0 and result and not section_str:
