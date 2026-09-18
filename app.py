@@ -1324,6 +1324,10 @@ def data_item_delete():
 
 PAYMENT_CATEGORIES = ['调课', '超课时', '管理', '夜自习', '出卷', '监考']
 
+# 补助导出分表：无任课课表但需指定归组的教师（姓名 → 1一年级/2二年级/3三年级）
+# 用途：行政/后勤等无课表人员的补助要并在某个年级表里而不是落到「其他人员」兜底表
+GRADE_TEACHER_OVERRIDE = {'金栋': 3, '杨正伟': 3}
+
 
 def _period_range(sid, pno):
     sem = db.session.get(Semester, sid) if sid else None
@@ -1409,18 +1413,25 @@ def payments_page():
 @app.route('/payments/read', methods=['POST'])
 @admin_required
 def payments_read():
-    """从其他项目读取当前周期补助（可指定项目，空=全部）"""
+    """从其他项目读取当前周期补助（可指定项目，空=全部）
+    已标为「手工调整」的行默认保留原金额不被覆盖（防误点把手工值刷掉）；
+    需要覆盖时先删除该行再读取，或传 force=1。"""
     sid = get_current_semester_id()
     pno = request.form.get('period', '1')
     pno = int(pno) if pno.isdigit() else 1
     cat = request.form.get('category', '').strip()
+    force = request.form.get('force', '') == '1'
     cats = [cat] if cat in PAYMENT_CATEGORIES else PAYMENT_CATEGORIES
     data = _payment_source(sid, pno)
     total = 0
+    kept = 0
     for c in cats:
         for tid, amt in data[c].items():
             rec = Payment.query.filter_by(semester_id=sid, period_no=pno, teacher_id=tid, category=c).first()
             if rec:
+                if rec.source == 'manual' and not force:
+                    kept += 1          # 手工调整值优先，不被自动值覆盖
+                    continue
                 rec.amount = round(amt, 2)
                 rec.source = 'auto'
                 rec.note = ''
@@ -1429,7 +1440,10 @@ def payments_read():
                                        category=c, amount=round(amt, 2), source='auto'))
             total += 1
     db.session.commit()
-    flash('已从其他项目读取：%s %d 条（第 %d 周期）' % ('、'.join(cats), total, pno))
+    msg = '已从其他项目读取：%s %d 条（第 %d 周期）' % ('、'.join(cats), total, pno)
+    if kept:
+        msg += '；跳过 %d 条手工调整值（保留原金额，需覆盖请先删除该行）' % kept
+    flash(msg)
     return redirect(url_for('payments_page', period=pno))
 
 
@@ -1521,7 +1535,7 @@ def payments_delete(pid):
 @app.route('/payments/export')
 @login_required
 def payments_export():
-    """导出补助发放表：夜自习按教务处模板（一年级/二年级 两张表）+ 其他项目一张表"""
+    """导出补助发放表：夜自习按教务处模板（一年级/二年级/三年级 三张表）+ 其他补助按年级分表"""
     sid = get_current_semester_id()
     pno = request.args.get('period', '1')
     pno = int(pno) if pno.isdigit() else 1
@@ -1530,61 +1544,94 @@ def payments_export():
     by_cat = {}
     for r in recs:
         by_cat.setdefault(r.category, {})[r.teacher_id] = r.amount
-    # 夜自习：按固定名单统计（次数 = 金额 ÷ 单价）
+    # 教师主带年级（按课表动态聚合，名单与班级总课表一致；按姓名归组兼容旧档案 id）
+    names, name_grade = _grade_teachers(sid)
+    # 夜自习：按年级分组统计（次数 = 金额 ÷ 单价）
     unit = get_setting_float('night_shift_unit_price', 0)
-    counts_y1 = {}
-    counts_y2 = {}
+    counts = {1: {}, 2: {}, 3: {}}
+    night_extra = {}
     for tid, amt in by_cat.get('夜自习', {}).items():
         name = teacher_name(tid)
         cnt = round(amt / unit) if unit else 0
-        if name in NIGHT_YEAR1_TEACHERS:
-            counts_y1[name] = cnt
-        elif name in NIGHT_YEAR2_TEACHERS:
-            counts_y2[name] = cnt
-    # 只显示本期有数据的项目；本期无数据的项目不出现在导出中
+        g = name_grade.get(name, 0)
+        if g in counts:
+            counts[g][name] = cnt
+        else:
+            night_extra[tid] = amt  # 无任课课表归属教师的夜自习金额，进兜底表不丢数据
+    has_night = any(counts.values())
+    # 其他补助项目（只显示本期有数据的项目）
     others = [c for c in PAYMENT_CATEGORIES if c != '夜自习']
-    # 名单外教师的夜自习金额（固定名单匹配不到的，如临时代课教师）
-    night_extra = {}
-    for tid, amt in by_cat.get('夜自习', {}).items():
-        if teacher_name(tid) not in NIGHT_YEAR1_TEACHERS and teacher_name(tid) not in NIGHT_YEAR2_TEACHERS:
-            night_extra[tid] = amt
-    if night_extra:
-        others = others + ['夜自习（名单外）']
-    others_active = [c for c in others if (by_cat.get(c) if c != '夜自习（名单外）' else night_extra)]
-    has_night = bool(counts_y1) or bool(counts_y2)
-    if not has_night and not others_active:
+    others_active = [c for c in others if by_cat.get(c)]
+    if not has_night and not others_active and not night_extra:
         flash('本期暂无任何补助数据，无需导出')
         return redirect(url_for('payments_page', period=pno))
     from openpyxl import Workbook
     if has_night:
-        wb = _night_stat_workbook(pno, counts_y1, counts_y2, sem, unit)
+        wb = _night_stat_workbook(pno, counts, names, sem, unit)
     else:
         wb = Workbook()
         wb.remove(wb.active)
-    # 其他项目 sheet（只显示有数据的项目列）
+    # 其他补助：按教师主带年级拆 3 个 sheet（行=该年级有补助的教师，列=该组有数据的项目）
+    grade_cn = {1: '一年级', 2: '二年级', 3: '三年级'}
     if others_active:
         from openpyxl.styles import Font, Alignment, Border, Side
         from openpyxl.utils import get_column_letter
-        tids = sorted({tid for c in others_active for tid in (by_cat.get(c, {}) if c != '夜自习（名单外）' else night_extra)})
-        ws = wb.create_sheet('其他项目')
-        ws.append(['教师'] + others_active + ['合计'])
+        thin = Side(style='thin')
+        bd = Border(left=thin, right=thin, top=thin, bottom=thin)
+        for g in (1, 2, 3):
+            g_tids = sorted({tid for c in others_active for tid in by_cat[c]
+                             if name_grade.get(teacher_name(tid), 0) == g},
+                            key=lambda t: teacher_name(t))
+            if not g_tids:
+                continue
+            # 三张年级表列结构统一（与本期有数据的项目一致），便于横向对比
+            g_cols = list(others_active)
+            ws = wb.create_sheet('%s补助' % grade_cn[g])
+            ws.append(['教师'] + g_cols + ['合计'])
+            for c in ws[1]:
+                c.font = Font(name='宋体', size=12, bold=True)
+                c.alignment = Alignment(horizontal='center')
+                c.border = bd
+            for tid in g_tids:
+                row = [teacher_name(tid)]
+                total = 0.0
+                for c in g_cols:
+                    amt = round(by_cat[c].get(tid, 0), 2)
+                    row.append(amt)
+                    total += amt
+                row.append(round(total, 2))
+                ws.append(row)
+            ws.column_dimensions['A'].width = 12
+            for i in range(2, len(g_cols) + 3):
+                ws.column_dimensions[get_column_letter(i)].width = 10
+    # 兜底：无任课课表归属教师的补助（含夜自习名单外金额）
+    extra_tids = sorted({tid for tid in night_extra} |
+                        {tid for c in others_active for tid in by_cat[c]
+                         if name_grade.get(teacher_name(tid), 0) not in (1, 2, 3)},
+                        key=lambda t: teacher_name(t))
+    if extra_tids:
+        from openpyxl.styles import Font, Alignment, Border, Side
+        thin = Side(style='thin')
+        bd = Border(left=thin, right=thin, top=thin, bottom=thin)
+        cols = [c for c in others_active if any(by_cat[c].get(tid) for tid in extra_tids)]
+        if night_extra:
+            cols = cols + ['夜自习（名单外）']
+        ws = wb.create_sheet('其他人员')
+        ws.append(['教师'] + cols + ['合计'])
         for c in ws[1]:
             c.font = Font(name='宋体', size=12, bold=True)
             c.alignment = Alignment(horizontal='center')
-            c.border = Border(left=Side(style='thin'), right=Side(style='thin'),
-                              top=Side(style='thin'), bottom=Side(style='thin'))
-        for tid in tids:
+            c.border = bd
+        for tid in extra_tids:
             row = [teacher_name(tid)]
             total = 0.0
-            for c in others_active:
-                amt = round((by_cat.get(c, {}).get(tid, 0) if c != '夜自习（名单外）' else night_extra.get(tid, 0)), 2)
+            for c in cols:
+                amt = round((by_cat[c].get(tid, 0) if c != '夜自习（名单外）' else night_extra.get(tid, 0)), 2)
                 row.append(amt)
                 total += amt
             row.append(round(total, 2))
             ws.append(row)
         ws.column_dimensions['A'].width = 12
-        for i in range(2, len(others_active) + 3):
-            ws.column_dimensions[get_column_letter(i)].width = 10
     bio = io.BytesIO()
     wb.save(bio)
     bio.seek(0)
@@ -1592,16 +1639,54 @@ def payments_export():
                      mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
 
 
-# ── 夜自习津贴发放表（严格按教务处模板格式，教师名单固定）──
-NIGHT_YEAR1_TEACHERS = ['曾鸿运', '郑化军', '陈惠仁', '张生武', '王登学', '邴喜红', '齐江', '邱俊科',
-                        '魏孔江', '陆泽龙', '白刚', '费俊娥', '金柏彤', '蔡娟娟', '张宝龙', '杨福敏',
-                        '岳晓艳', '王鑫', '赵家琪', '蔺文婧', '钱宏翠', '蒋燕', '张莹', '郭晓津',
-                        '丁小会', '潘红艳', '杨小灵', '张建强', '魏俊楠', '高红岩', '刘怀蔓', '周军藏', '黄雪玲']
-NIGHT_YEAR2_TEACHERS = ['张光武', '徐玺怀', '魏婧', '李丽', '蒋桂芝', '贾明茂', '金小刚', '张文军',
-                        '宿继忠', '王海燕', '金栋', '张瑞娟', '张玉婷', '张官军', '王俊英', '金翠凤',
-                        '金红娟', '高佳宏', '齐科厚', '赵宗发', '金维晓', '张凯嘉', '张虹霞', '马小龙',
-                        '张海龙', '杨正伟', '周亚楠', '张榕', '秦美玲', '金辉童', '赵满强', '隆亚丽',
-                        '金万钟', '马文强', '杜玉斌', '曾赟']
+# ── 夜自习津贴发放表（教务处模板格式）──
+# 年级教师名单不再硬编码，按课表(schedule_cell)动态聚合：教师按其任课课时最多的年级归组
+# （一年级=2026级 二年级=2025级 三年级=2024级），随班级总课表自动更新
+
+def _class_grade(cid):
+    """班级所属年级：26/2026级=1(一年级) 25级=2(二年级) 24级=3(三年级)，无法判定返回 0"""
+    c = db.session.get(ClassInfo, cid) if cid else None
+    if not c:
+        return 0
+    nm = c.name or ''
+    g = (c.grade or '').replace('级', '')
+    if '2026' in g or nm.startswith(('26', '2026')):
+        return 1
+    if '2025' in g or nm.startswith('25'):
+        return 2
+    if '2024' in g or nm.startswith('24'):
+        return 3
+    return 0
+
+
+def _grade_teachers(sid):
+    """按课表聚合每年级任课教师名单与教师主带年级。
+    返回 (names, name_grade)：
+      names      = {1: [姓名...], 2: [...], 3: [...]} 每年级课任教师名单（按姓名排序）
+      name_grade = {教师姓名: 1/2/3} 按姓名归组（跨年级按课时最多的年级归组，并列取低年级）。
+      按姓名而非教师 id 归组：兼容历史数据里残留的旧教师档案 id（同名即同人）。
+    GRADE_TEACHER_OVERRIDE 里的教师（无任课但需归组，如行政人员）覆盖归组结果，
+    但**不进入夜自习名单 names**（避免夜自习表里出现无排班的空行）。"""
+    hours = {}
+    if sid:
+        for c in ScheduleCell.query.filter_by(semester_id=sid).all():
+            g = _class_grade(c.class_id)
+            if not g:
+                continue
+            hours.setdefault(c.teacher_id, {})
+            hours[c.teacher_id][g] = hours[c.teacher_id].get(g, 0) + 1
+    tgrade = {tid: max(gh, key=lambda k: (gh[k], -k)) for tid, gh in hours.items()}
+    name_grade = {teacher_name(tid): g for tid, g in tgrade.items()}
+    names = {1: [], 2: [], 3: []}
+    for name, g in name_grade.items():
+        names[g].append(name)
+    for g in names:
+        names[g] = sorted(set(names[g]))
+    # 手工归组（仅用于补助分表；不进夜自习名单）
+    for _nm, _g in GRADE_TEACHER_OVERRIDE.items():
+        if _g in (1, 2, 3):
+            name_grade[_nm] = _g
+    return names, name_grade
 
 
 def _semester_title(sem):
@@ -1782,44 +1867,46 @@ def _night_stat_sheet(ws, title, period_str, grade_label, names, counts):
     ws.column_dimensions['D'].width = 13
 
 
-def _night_stat_workbook(period, counts_y1, counts_y2, sem=None, unit=20):
-    """生成夜自习津贴发放表 workbook（一年级/二年级 两个 sheet，教务处模板格式）"""
+def _night_stat_workbook(period, counts, names, sem=None, unit=20):
+    """生成夜自习津贴发放表 workbook（一年级/二年级/三年级 三个 sheet，教务处模板格式）
+    counts = {1: {姓名: 次数}, 2: {...}, 3: {...}}   names = {1: [姓名], 2: [...], 3: [...]}"""
     from openpyxl import Workbook
     title = '%s夜自习津贴发放表' % _semester_title(sem)
     period_str = '%d-%d周' % ((period - 1) * 4 + 1, period * 4)
     wb = Workbook()
-    for label, names, counts in [('一年级课任教师', NIGHT_YEAR1_TEACHERS, counts_y1),
-                                 ('二年级课任教师', NIGHT_YEAR2_TEACHERS, counts_y2)]:
-        ws = wb.active if label.startswith('一年级') else wb.create_sheet()
-        ws.title = '一年级' if label.startswith('一年级') else '二年级'
-        ws._night_unit = unit
-        _night_stat_sheet(ws, title, period_str, label, names, counts)
+    wb._night_unit = unit
+    grade_cn = {1: '一年级', 2: '二年级', 3: '三年级'}
+    for g in (1, 2, 3):
+        ws = wb.active if g == 1 else wb.create_sheet()
+        ws.title = grade_cn[g]
+        _night_stat_sheet(ws, title, period_str, '%s课任教师' % grade_cn[g],
+                          names.get(g, []), counts.get(g, {}))
     return wb
 
 
 @app.route('/night/stats/export')
 @login_required
 def night_stats_export():
-    """夜自习统计导出（教务处模板格式：一年级/二年级 两张表）"""
+    """夜自习统计导出（教务处模板格式：一年级/二年级/三年级 三张表，名单按课表动态）"""
     sid = get_current_semester_id()
     pno = request.args.get('period', '')
     pno = int(pno) if pno.isdigit() else 1
     sem = db.session.get(Semester, sid) if sid else None
     pr = _period_range(sid, pno)
     unit = get_setting_float('night_shift_unit_price', 0)
-    counts_y1 = {}
-    counts_y2 = {}
+    names, name_grade = _grade_teachers(sid)
+    counts = {1: {}, 2: {}, 3: {}}
     if pr and sem:
         shifts = NightShift.query.filter_by(semester_id=sid) \
             .filter(NightShift.status != 'absent') \
             .filter(NightShift.shift_date >= pr[1], NightShift.shift_date <= pr[2]).all()
         for s in shifts:
             name = teacher_name(s.teacher_id)
-            if name in NIGHT_YEAR1_TEACHERS:
-                counts_y1[name] = counts_y1.get(name, 0) + 1
-            elif name in NIGHT_YEAR2_TEACHERS:
-                counts_y2[name] = counts_y2.get(name, 0) + 1
-    wb = _night_stat_workbook(pno, counts_y1, counts_y2, sem, unit)
+            g = name_grade.get(name, 0)
+            if g in counts:
+                counts[g][name] = counts[g].get(name, 0) + 1
+            # 无任课课表归属的值班记录（grade 0）不进入三张年级表，避免凭空归属
+    wb = _night_stat_workbook(pno, counts, names, sem, unit)
     bio = io.BytesIO()
     wb.save(bio)
     bio.seek(0)
@@ -3770,16 +3857,15 @@ def workload_rows(sid):
     rows = []
     for t in teachers:
         cells = ScheduleCell.query.filter_by(semester_id=sid, teacher_id=t.id).all()
-        weekly_raw = 0.0
-        # 按 (task, 周几, 节次) 去重：合班课同一节课有多个班的 cell，只计一次
-        seen = set()
+        # 合班课同一节次只计一次：按 (周几, 节次) 归并，同一节次取最大权重
+        # （原来按 task_id/class_id 去重，合班两班的 cell 会各算一次，周课时翻倍虚高）
+        slot_w = {}
         for c in cells:
-            key = ((c.task_id or ('c%d' % c.class_id)), c.weekday, c.period)
-            if key in seen:
-                continue
-            seen.add(key)
+            key = (c.weekday, c.period)
             wt = 1.0 if c.week_type == 'every' else 0.5
-            weekly_raw += wt
+            if wt > slot_w.get(key, 0):
+                slot_w[key] = wt
+        weekly_raw = sum(slot_w.values())
         # 请假扣减：已通过的请假节次（含看课的），直接扣实际课时
         leaves = LeaveRequest.query.filter_by(semester_id=sid, teacher_id=t.id, status='approved').all()
         leave_periods = sum(len(l.period_list()) for l in leaves)
@@ -3857,17 +3943,16 @@ def _current_period_no(sid):
 
 
 def _teacher_weekly_coef(sid, tid):
-    """教师周课时（无系数，上一节算一节），按 (task, 周几, 节次) 去重合班"""
+    """教师周课时（无系数，上一节算一节），按 (周几, 节次) 去重合班"""
     cells = ScheduleCell.query.filter_by(semester_id=sid, teacher_id=tid).all()
-    weekly_raw = 0.0
-    seen = set()
+    # 合班课同一节次只计一次（按 周几+节次 归并，取最大权重）
+    slot_w = {}
     for c in cells:
-        key = ((c.task_id or ('c%d' % c.class_id)), c.weekday, c.period)
-        if key in seen:
-            continue
-        seen.add(key)
+        key = (c.weekday, c.period)
         wt = 1.0 if c.week_type == 'every' else 0.5
-        weekly_raw += wt
+        if wt > slot_w.get(key, 0):
+            slot_w[key] = wt
+    weekly_raw = sum(slot_w.values())
     return round(weekly_raw, 2), round(weekly_raw, 2)
 
 

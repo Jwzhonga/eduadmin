@@ -150,4 +150,25 @@
 </div>
 {% endif %}
 {% endfor %}
+
+<script>
+// 教师下拉按姓名拼音排序（请假教师/顶课教师），占位选项保持最前
+(function () {
+    // 多音字姓氏按姓读修正为同音字，保证拼音排序落位正确（例：曾 姓读 zēng → 增）
+    var SURNAME_FIX = { '曾': '增' };
+    function pinyinKey(name) {
+        return name.replace(/^./, function (ch) { return SURNAME_FIX[ch] || ch; });
+    }
+    function sortTeacherOptions(sel) {
+        var opts = Array.prototype.slice.call(sel.options);
+        var head = opts.filter(function (o) { return o.value === ''; });
+        var rest = opts.filter(function (o) { return o.value !== ''; });
+        rest.sort(function (a, b) {
+            return pinyinKey(a.textContent).localeCompare(pinyinKey(b.textContent), 'zh-Hans-CN-u-co-pinyin');
+        });
+        head.concat(rest).forEach(function (o) { sel.appendChild(o); });
+    }
+    document.querySelectorAll('select[name="teacher_id"], select[name="watch_teacher_id"]').forEach(sortTeacherOptions);
+})();
+</script>
 {% endblock %}
