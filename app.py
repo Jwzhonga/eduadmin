@@ -1331,7 +1331,7 @@ GRADE_TEACHER_OVERRIDE = {
     '张建强': 2, '魏俊楠': 2, '刘丹凤': 1,       # 经费平衡：一年级/三年级各转出，二年级转入
 }
 # 仅补助分表归组（无任课课表的行政/后勤人员，不占夜自习名单）
-GRADE_TEACHER_PAYONLY = {'金栋': 3, '杨正伟': 3}
+GRADE_TEACHER_PAYONLY = {'金栋': 3, '杨正伟': 3, '赵凯': 1}   # 赵凯（校长）400 元/周期管理费记一年级
 
 
 def _period_range(sid, pno):
