@@ -1596,11 +1596,7 @@ def payments_export():
             # 三张年级表列结构统一（与本期有数据的项目一致），便于横向对比
             g_cols = list(others_active)
             ws = wb.create_sheet('%s补助' % grade_cn[g])
-            ws.append(['教师'] + g_cols + ['合计'])
-            for c in ws[1]:
-                c.font = Font(name='宋体', size=12, bold=True)
-                c.alignment = Alignment(horizontal='center')
-                c.border = bd
+            rows = []
             for tid in g_tids:
                 row = [teacher_name(tid)]
                 total = 0.0
@@ -1609,10 +1605,10 @@ def payments_export():
                     row.append(amt)
                     total += amt
                 row.append(round(total, 2))
-                ws.append(row)
-            ws.column_dimensions['A'].width = 12
-            for i in range(2, len(g_cols) + 3):
-                ws.column_dimensions[get_column_letter(i)].width = 10
+                rows.append(row)
+            _pay_stat_sheet(ws, '%s补助发放表' % _semester_title(sem),
+                            '%d-%d周' % ((pno - 1) * 4 + 1, pno * 4),
+                            '%s教师' % grade_cn[g], ['教师'] + g_cols + ['合计'], rows)
     # 兜底：无任课课表归属教师的补助（含夜自习名单外金额）
     extra_tids = sorted({tid for tid in night_extra} |
                         {tid for c in others_active for tid in by_cat[c]
@@ -1885,6 +1881,66 @@ def _night_stat_sheet(ws, title, period_str, grade_label, names, counts):
     ws.column_dimensions['B'].width = 17
     ws.column_dimensions['C'].width = 22.5
     ws.column_dimensions['D'].width = 13
+
+
+def _pay_stat_sheet(ws, title, period_str, grade_label, headers, rows):
+    """补助发放表一个年级 sheet：外壳与夜自习津贴发放表一致（标题/周期/年级/表头/明细/合计/大写/落款）
+
+    headers/rows 由调用方给出，最后一列必须是「合计」（用于合计行与大写金额）。"""
+    from openpyxl.styles import Font, Alignment, Border, Side
+    from openpyxl.utils import get_column_letter
+    thin = Side(style='thin')
+    border = Border(left=thin, top=thin, right=thin, bottom=thin)
+    center = Alignment(horizontal='center', vertical='center')
+    ncol = max(1, len(headers))
+    last = get_column_letter(ncol)
+    ws.merge_cells('A1:%s1' % last)
+    ws['A1'] = title
+    ws['A1'].font = Font(name='宋体', size=20, bold=True)
+    ws['A1'].alignment = center
+    ws.row_dimensions[1].height = 36.75
+    ws['A2'] = period_str
+    ws['A2'].font = Font(name='宋体', size=14)
+    ws['A2'].alignment = center
+    ws.row_dimensions[2].height = 23
+    ws.merge_cells('A3:%s3' % last)
+    ws['A3'] = grade_label
+    ws['A3'].font = Font(name='宋体', size=14)
+    ws['A3'].alignment = center
+    ws.row_dimensions[3].height = 23
+    for ci, h in enumerate(headers, 1):
+        c = ws.cell(row=4, column=ci, value=h)
+        c.font = Font(name='宋体', size=14)
+        c.alignment = center
+        c.border = border
+    ws.row_dimensions[4].height = 22
+    total = 0.0
+    for i, row in enumerate(rows):
+        r = 5 + i
+        for ci, v in enumerate(row, 1):
+            c = ws.cell(row=r, column=ci, value=v)
+            c.font = Font(name='宋体', size=12)
+            c.alignment = center
+            c.border = border
+        total += row[-1] or 0
+    tr = 5 + len(rows)
+    c = ws.cell(row=tr, column=1, value='合计')
+    c.font = Font(name='宋体', size=12, bold=True)
+    c.alignment = center
+    c.border = border
+    for ci in range(2, ncol):
+        ws.cell(row=tr, column=ci).border = border
+    c = ws.cell(row=tr, column=ncol, value=round(total, 2))
+    c.font = Font(name='宋体', size=12, bold=True)
+    c.alignment = center
+    c.border = border
+    ws.cell(row=tr + 1, column=1, value='大写').font = Font(name='宋体', size=12)
+    ws.cell(row=tr + 1, column=1).alignment = center
+    ws.cell(row=tr + 1, column=2, value=_rmb_upper(total)).font = Font(name='宋体', size=12)
+    ws.cell(row=tr + 2, column=1, value='统计：                   审核：                    审批：')
+    ws.column_dimensions['A'].width = 12
+    for i in range(2, ncol + 1):
+        ws.column_dimensions[get_column_letter(i)].width = 12
 
 
 def _night_stat_workbook(period, counts, names, sem=None, unit=20):
