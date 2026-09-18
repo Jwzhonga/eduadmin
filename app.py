@@ -1324,9 +1324,14 @@ def data_item_delete():
 
 PAYMENT_CATEGORIES = ['调课', '超课时', '管理', '夜自习', '出卷', '监考']
 
-# 补助导出分表：无任课课表但需指定归组的教师（姓名 → 1一年级/2二年级/3三年级）
-# 用途：行政/后勤等无课表人员的补助要并在某个年级表里而不是落到「其他人员」兜底表
-GRADE_TEACHER_OVERRIDE = {'金栋': 3, '杨正伟': 3}
+# 补助/夜自习分表的年级归组覆盖（姓名 → 1一年级/2二年级/3三年级）
+# 用于 ① 年级组长等角色归位 ② 按年级经费预算做金额平衡（调整个别跨年级教师的归属）
+GRADE_TEACHER_OVERRIDE = {
+    '潘红艳': 1, '蔺文婧': 2, '高玉芳': 3,       # 年级组长归位（潘红艳一年级、蔺文婧二年级、高玉芳三年级）
+    '张建强': 2, '魏俊楠': 2, '刘丹凤': 1,       # 经费平衡：一年级/三年级各转出，二年级转入
+}
+# 仅补助分表归组（无任课课表的行政/后勤人员，不占夜自习名单）
+GRADE_TEACHER_PAYONLY = {'金栋': 3, '杨正伟': 3}
 
 
 def _period_range(sid, pno):
@@ -1682,8 +1687,19 @@ def _grade_teachers(sid):
         names[g].append(name)
     for g in names:
         names[g] = sorted(set(names[g]))
-    # 手工归组（仅用于补助分表；不进夜自习名单）
+    # 手工归组：同时改「主带年级」和夜自习名单（年级间搬移，保持名单有序）
     for _nm, _g in GRADE_TEACHER_OVERRIDE.items():
+        if _g not in (1, 2, 3):
+            continue
+        _old = name_grade.get(_nm)
+        name_grade[_nm] = _g
+        if _old in (1, 2, 3) and _old != _g and _nm in names[_old]:
+            names[_old].remove(_nm)
+        if _nm not in names[_g]:
+            names[_g].append(_nm)
+            names[_g].sort()
+    # 仅补助分表归组（无任课课表人员，不占夜自习名单）
+    for _nm, _g in GRADE_TEACHER_PAYONLY.items():
         if _g in (1, 2, 3):
             name_grade[_nm] = _g
     return names, name_grade
