@@ -1561,6 +1561,10 @@ def payments_export():
         g = name_grade.get(name, 0)
         if g in counts:
             counts[g][name] = cnt
+            # 兜底：名单里没有这个人也补进去渲染，否则金额会静默丢失
+            # （如 GRADE_TEACHER_PAYONLY 归组的无课表人员、或名单与归组不同步）
+            if name not in names[g]:
+                names[g] = sorted(names[g] + [name])
         else:
             night_extra[tid] = amt  # 无任课课表归属教师的夜自习金额，进兜底表不丢数据
     has_night = any(counts.values())
