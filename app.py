@@ -1609,10 +1609,11 @@ def payments_export():
                     row.append(amt)
                     total += amt
                 row.append(round(total, 2))
+                row.append('')            # 签名列留空
                 rows.append(row)
             _pay_stat_sheet(ws, '%s补助发放表' % _semester_title(sem),
                             '%d-%d周' % ((pno - 1) * 4 + 1, pno * 4),
-                            '%s教师' % grade_cn[g], ['教师'] + g_cols + ['合计'], rows)
+                            '%s教师' % grade_cn[g], ['教师'] + g_cols + ['合计', '签名'], rows)
     # 兜底：无任课课表归属教师的补助（含夜自习名单外金额）
     extra_tids = sorted({tid for tid in night_extra} |
                         {tid for c in others_active for tid in by_cat[c]
@@ -1641,6 +1642,7 @@ def payments_export():
             row.append(round(total, 2))
             ws.append(row)
         ws.column_dimensions['A'].width = 12
+        _a4_setup(ws, [12] + [14] * len(cols) + [12])
     bio = io.BytesIO()
     wb.save(bio)
     bio.seek(0)
@@ -1807,6 +1809,38 @@ def _apply_uniform_style(ws, header_row=1):
                 c.alignment = Alignment(horizontal='left', vertical='center')
 
 
+def _a4_setup(ws, widths, budget_px=660):
+    """A4 纵向单页排版：收列宽（Excel 口径 px = 7w+5）+ 页面设置（正好一张 A4）
+
+    budget_px 660 ≈ 17.5cm < A4 纵向可打印宽度（21 − 0.6in×2 ≈ 18.0cm）。
+    超宽时先收最后一列（签名），再从最宽的内容列收，最小留 8。
+    """
+    from openpyxl.utils import get_column_letter
+    from openpyxl.worksheet.properties import PageSetupProperties
+    from openpyxl.worksheet.page import PageMargins
+    w = list(widths)
+    px = lambda vals: sum(7 * v + 5 for v in vals)
+    while px(w) > budget_px and w and w[-1] > 16:
+        w[-1] -= 1
+    guard = 0
+    while px(w) > budget_px and guard < 2000:
+        guard += 1
+        i = max(range(max(1, len(w) - 1)), key=lambda k: w[k])
+        if w[i] <= 8:
+            break
+        w[i] -= 1
+    for i, v in enumerate(w, 1):
+        ws.column_dimensions[get_column_letter(i)].width = v
+    ws.page_setup.orientation = 'portrait'
+    ws.page_setup.paperSize = ws.PAPERSIZE_A4
+    ws.page_setup.fitToWidth = 1
+    ws.page_setup.fitToHeight = 1
+    ws.sheet_properties.pageSetUpPr = PageSetupProperties(fitToPage=True)
+    ws.page_margins = PageMargins(left=0.6, right=0.6, top=0.7, bottom=0.7, header=0.3, footer=0.3)
+    ws.print_options.horizontalCentered = True
+    ws.print_area = 'A1:%s%d' % (get_column_letter(len(w)), max(1, ws.max_row))
+
+
 def _night_stat_sheet(ws, title, period_str, grade_label, names, counts):
     """按教务处模板格式填充一个年级 sheet：标题/周期/年级/表头/名单/合计/大写/落款"""
     from openpyxl.styles import Font, Alignment, Border, Side
@@ -1886,17 +1920,15 @@ def _night_stat_sheet(ws, title, period_str, grade_label, names, counts):
     ws.merge_cells(start_row=sign_row, start_column=1, end_row=sign_row, end_column=4)
     ws.cell(row=sign_row, column=1, value='统计：                   审核：                     审批：').font = Font(name='宋体', size=12)
     ws.cell(row=sign_row, column=1).alignment = left
-    # 列宽
-    ws.column_dimensions['A'].width = 10.66
-    ws.column_dimensions['B'].width = 17
-    ws.column_dimensions['C'].width = 22.5
-    ws.column_dimensions['D'].width = 13
+    # 列宽 + A4 纵向单页排版（正好一张 A4）
+    _a4_setup(ws, [14, 16, 18, 42])
 
 
 def _pay_stat_sheet(ws, title, period_str, grade_label, headers, rows):
     """补助发放表一个年级 sheet：外壳与夜自习津贴发放表一致（标题/周期/年级/表头/明细/合计/大写/落款）
 
-    headers/rows 由调用方给出，最后一列必须是「合计」（用于合计行与大写金额）。"""
+    合计列用表头里的「合计」定位（最后一列是「签名」，且不参与合计）；
+    列宽与页面按 A4 纵向单页排（_a4_setup）。"""
     from openpyxl.styles import Font, Alignment, Border, Side
     from openpyxl.utils import get_column_letter
     thin = Side(style='thin')
@@ -1904,6 +1936,8 @@ def _pay_stat_sheet(ws, title, period_str, grade_label, headers, rows):
     center = Alignment(horizontal='center', vertical='center')
     ncol = max(1, len(headers))
     last = get_column_letter(ncol)
+    # 合计列按表头定位（最后一列是「签名」，不能再假设 row[-1] 是合计）
+    ti = headers.index('合计') if '合计' in headers else ncol - 1
     ws.merge_cells('A1:%s1' % last)
     ws['A1'] = title
     ws['A1'].font = Font(name='宋体', size=20, bold=True)
@@ -1932,25 +1966,29 @@ def _pay_stat_sheet(ws, title, period_str, grade_label, headers, rows):
             c.font = Font(name='宋体', size=12)
             c.alignment = center
             c.border = border
-        total += row[-1] or 0
+        total += row[ti] or 0
     tr = 5 + len(rows)
     c = ws.cell(row=tr, column=1, value='合计')
     c.font = Font(name='宋体', size=12, bold=True)
     c.alignment = center
     c.border = border
-    for ci in range(2, ncol):
+    for ci in range(2, ncol + 1):
         ws.cell(row=tr, column=ci).border = border
-    c = ws.cell(row=tr, column=ncol, value=round(total, 2))
+    c = ws.cell(row=tr, column=ti + 1, value=round(total, 2))
     c.font = Font(name='宋体', size=12, bold=True)
     c.alignment = center
     c.border = border
     ws.cell(row=tr + 1, column=1, value='大写').font = Font(name='宋体', size=12)
     ws.cell(row=tr + 1, column=1).alignment = center
-    ws.cell(row=tr + 1, column=2, value=_rmb_upper(total)).font = Font(name='宋体', size=12)
+    ws.merge_cells(start_row=tr + 1, start_column=2, end_row=tr + 1, end_column=ncol)
+    u = ws.cell(row=tr + 1, column=2, value=_rmb_upper(total))
+    u.font = Font(name='宋体', size=12)
+    u.alignment = center
+    ws.merge_cells(start_row=tr + 2, start_column=1, end_row=tr + 2, end_column=ncol)
     ws.cell(row=tr + 2, column=1, value='统计：                   审核：                    审批：')
-    ws.column_dimensions['A'].width = 12
-    for i in range(2, ncol + 1):
-        ws.column_dimensions[get_column_letter(i)].width = 12
+    ws.cell(row=tr + 2, column=1).alignment = Alignment(horizontal='left', vertical='center')
+    # 列宽 + A4 纵向单页排版（正好一张 A4）：教师 + 各项目列 + 合计 + 签名
+    _a4_setup(ws, [14] + [10] * max(0, ncol - 3) + [12, 22])
 
 
 def _night_stat_workbook(period, counts, names, sem=None, unit=20):
