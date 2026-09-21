@@ -1322,7 +1322,10 @@ def data_item_delete():
     return redirect(url_for('data_management'))
 
 
-PAYMENT_CATEGORIES = ['调课', '超课时', '管理', '夜自习', '出卷', '监考']
+PAYMENT_CATEGORIES = ['调课', '超课时', '管理', '早自习', '夜自习', '出卷', '监考']
+
+# 无自动数据源的补助项目（只能手动录入/添加，页面不提供「读取」）
+PAYMENT_MANUAL_ONLY = ('出卷', '监考', '早自习')
 
 # 补助/夜自习分表的年级归组覆盖（姓名 → 1一年级/2二年级/3三年级）
 # 用于 ① 年级组长等角色归位 ② 按年级经费预算做金额平衡（调整个别跨年级教师的归属）
@@ -1412,7 +1415,8 @@ def payments_page():
     period_range_str = '%s ~ %s' % (pr[1].strftime('%m-%d'), pr[2].strftime('%m-%d')) if pr else ''
     return render_template('payments.html', period_nos=period_nos, cur=cur, grid=grid,
                            teachers=teachers, source_data=source_data,
-                           period_range_str=period_range_str, categories=PAYMENT_CATEGORIES)
+                           period_range_str=period_range_str, categories=PAYMENT_CATEGORIES,
+                           manual_only=PAYMENT_MANUAL_ONLY)
 
 
 @app.route('/payments/read', methods=['POST'])

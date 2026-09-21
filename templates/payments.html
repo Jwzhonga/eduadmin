@@ -15,7 +15,7 @@
 <div class="alert alert-light border p-2 mb-2" style="border-radius:10px;font-size:12px;color:#515154">
     <i class="fas fa-info-circle" style="color:#007aff"></i>
     每 <strong>4 周</strong> 发放一次（第 {{ cur }} 周期：{{ period_range_str }}）。点「读取」自动从各项目汇总，
-    金额可直接修改后「保存」；出卷/监考无数据源，手动添加。导出的 Excel 中<strong>夜自习单独一张表</strong>，其他项目一张表。
+    金额可直接修改后「保存」；出卷/监考/早自习无数据源，手动添加。导出的 Excel 中<strong>夜自习单独一张表</strong>，其他项目一张表。
 </div>
 
 <form method="post" action="/payments/save">
@@ -30,13 +30,14 @@
                         {% elif cat == '调课' %}<i class="fas fa-exchange-alt" style="color:#007aff"></i>
                         {% elif cat == '超课时' %}<i class="fas fa-chart-bar" style="color:#ff9500"></i>
                         {% elif cat == '管理' %}<i class="fas fa-user-tie" style="color:#5856d6"></i>
+                        {% elif cat == '早自习' %}<i class="fas fa-sun" style="color:#ff9500"></i>
                         {% elif cat == '出卷' %}<i class="fas fa-file-alt" style="color:#ff3b30"></i>
                         {% else %}<i class="fas fa-clipboard-check" style="color:#34c759"></i>{% endif %}
                         {{ cat }}
                         {% if source_data.get(cat) %}<span class="badge text-bg-light border" style="font-size:10px">{{ source_data[cat]|length }} 条可读取</span>{% endif %}
                     </span>
                     <div class="d-flex gap-1">
-                        <button type="submit" formaction="/payments/read" name="category" value="{{ cat }}" class="btn btn-sm btn-outline-primary" style="padding:0 8px;font-size:12px"><i class="fas fa-sync"></i> 读取</button>
+                        {% if cat not in manual_only %}<button type="submit" formaction="/payments/read" name="category" value="{{ cat }}" class="btn btn-sm btn-outline-primary" style="padding:0 8px;font-size:12px"><i class="fas fa-sync"></i> 读取</button>{% endif %}
                         <button type="button" class="btn btn-sm btn-outline-secondary" style="padding:0 8px;font-size:12px" onclick="document.getElementById('addCat').value='{{ cat }}'; new bootstrap.Modal(document.getElementById('addModal')).show()"><i class="fas fa-plus"></i></button>
                     </div>
                 </div>
@@ -54,7 +55,7 @@
                             </tr>
                             {% else %}
                             <tr><td colspan="4" class="text-center text-muted py-3" style="font-size:12px">
-                                {% if cat in ('出卷', '监考') %}手动添加{% else %}点「读取」从{{ '夜自习统计' if cat == '夜自习' else cat + '模块' }}汇总{% endif %}
+                                {% if cat in manual_only %}手动添加{% else %}点「读取」从{{ '夜自习统计' if cat == '夜自习' else cat + '模块' }}汇总{% endif %}
                             </td></tr>
                             {% endfor %}
                         </tbody>
