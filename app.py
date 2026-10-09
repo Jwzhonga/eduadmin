@@ -574,21 +574,27 @@ class ScheduleCell(db.Model):
     week_type = db.Column(db.String(8), default='every') # every/odd/even
 
 class Holiday(db.Model):
-    """节假日/停课日（校历特殊日：停课日，仅记录管理，不参与有效周计算）"""
+    """节假日/停课日（校历特殊日：停课日）
+    period_from/period_to 为空 = 整天停课；period_from=7 表示第7节起停课；两者都给 = 该节次区间停课。
+    停课日参与「超课时统计」的实际课时计算（半天停课只剔除对应节次）"""
     __tablename__ = 'holiday'
     id = db.Column(db.Integer, primary_key=True)
     semester_id = db.Column(db.Integer, db.ForeignKey('semester.id'), nullable=False)
     holiday_date = db.Column(db.Date, nullable=False)
     name = db.Column(db.String(64), default='放假')
     remark = db.Column(db.String(255), default='')
+    period_from = db.Column(db.Integer, nullable=True)   # 停课起始节（空=全天）
+    period_to = db.Column(db.Integer, nullable=True)     # 停课结束节（空=到当天末节）
 
 class SchoolDay(db.Model):
-    """上课日（校历特殊日：调休补课）——具体日期 或 星期几规律，二选一"""
+    """上课日（校历特殊日：调休补课）——具体日期 或 星期几规律，二选一
+    follow_weekday = 该日按周几的课表上课（空=按本日星期），如国庆调休周六补上星期三的课"""
     __tablename__ = 'school_day'
     id = db.Column(db.Integer, primary_key=True)
     semester_id = db.Column(db.Integer, db.ForeignKey('semester.id'), nullable=False)
     day_date = db.Column(db.Date, nullable=True)      # 具体日期模式（如 2026-10-10 国庆调休补课）
     weekday = db.Column(db.Integer, nullable=True)    # 星期几规律模式（1=周一..7=周日，本学期内每周该日都算上课日）
+    follow_weekday = db.Column(db.Integer, nullable=True)  # 按周几的课表上课（1=周一..7=周日，空=按本日）
     name = db.Column(db.String(64), default='补课')
     remark = db.Column(db.String(255), default='')
     created_at = db.Column(db.DateTime, default=datetime.now)
@@ -3796,8 +3802,152 @@ def leaves_stats():
                            watch_unit=get_setting_float('watch_unit_price', 0))
 
 # ══════════════════════════════════════════════
-# 超课时统计：职务标准课时 + 学科系数 + 节假日 + 自动统计
+# 超课时统计：职务标准课时 + 校历（停课日/补课日）+ 逐周自动统计
 # ══════════════════════════════════════════════
+
+# ── 校历感知的课时引擎 ──
+def _periods_per_day():
+    try:
+        return max(1, int(get_setting_float('periods_per_day', 7) or 7))
+    except Exception:
+        return 7
+
+
+def _workdays_per_week():
+    """每周上课天数（1=只周一，5=周一~周五）"""
+    try:
+        return min(7, max(1, int(get_setting_float('workdays', 5) or 5)))
+    except Exception:
+        return 5
+
+
+def _holiday_blocked(h, ppd):
+    """停课日当天被停掉的节次集合；period_from 为空 = 整天停课"""
+    if h is None:
+        return set()
+    pf = h.period_from or 0
+    if not pf:
+        return set(range(1, ppd + 1))
+    pt = h.period_to or ppd
+    pf, pt = max(1, int(pf)), min(ppd, int(pt))
+    if pt < pf:
+        pf, pt = pt, pf
+    return set(range(pf, pt + 1))
+
+
+def calendar_class_days(sid, start, end):
+    """周期/学期内的上课日清单：[(日期, 有效周几, 可上课节次集合)]
+    - 默认每周 周一~周N 上课（workdays 设置），周六周日不上
+    - 停课日：整天剔除；半日停课（period_from/to）只剔除对应节次
+    - 上课日（补课）：day_date 命中即算上课日；follow_weekday 指定按周几的课表上课
+    - 星期几规律（SchoolDay.weekday）命中的星期几整学期都算上课日"""
+    ppd, wdc = _periods_per_day(), _workdays_per_week()
+    hol = {h.holiday_date: h for h in Holiday.query.filter_by(semester_id=sid).all()}
+    sd_date, sd_week = {}, {}
+    for s in SchoolDay.query.filter_by(semester_id=sid).all():
+        if s.day_date:
+            sd_date[s.day_date] = s
+        elif s.weekday:
+            sd_week[s.weekday] = s
+    out = []
+    d = start
+    while d <= end:
+        w = d.weekday() + 1
+        taught = set(range(1, ppd + 1)) - _holiday_blocked(hol.get(d), ppd)
+        s = sd_date.get(d)
+        if s:
+            eff = s.follow_weekday or w
+        elif w <= wdc or w in sd_week:
+            eff = (sd_week[w].follow_weekday or w) if w in sd_week else w
+        else:
+            d += timedelta(days=1)
+            continue
+        if taught:
+            out.append((d, eff, taught))
+        d += timedelta(days=1)
+    return out
+
+
+def _slot_weights(sid, tid):
+    """教师周课表 {(周几, 节次): 权重}；合班课同一节次只计一次（取最大权重）"""
+    slot_w = {}
+    for c in ScheduleCell.query.filter_by(semester_id=sid, teacher_id=tid).all():
+        key = (c.weekday, c.period)
+        wt = 1.0 if c.week_type == 'every' else 0.5
+        if wt > slot_w.get(key, 0):
+            slot_w[key] = wt
+    return slot_w
+
+
+def _leave_map(sid):
+    """{(教师id, 日期): 请假节数}——已通过的请假"""
+    res = {}
+    for l in LeaveRequest.query.filter_by(semester_id=sid, status='approved').all():
+        k = (l.teacher_id, l.leave_date)
+        res[k] = res.get(k, 0) + len(l.period_list())
+    return res
+
+
+def _week_no(d, base):
+    return ((d - base).days // 7) + 1
+
+
+def _workload_calc(sid, start, end, prorate=True, teachers=None, days=None):
+    """逐周超课时引擎（校历感知）：
+      每周实际 = Σ 该周上课日 该教师该日有效课表节数（剔停课节次，合班只计一次）
+      每周标准 = 职务周标准 × (该周上课天数 ÷ 每周上课天数)   [prorate=False 用满标准]
+      超课时   = Σ 每周 max(0, 该周实际 − 该周请假 − 该周标准)
+    返回 (rows, meta)；rows 字段与旧版兼容（weekly_raw/weeks/actual/leave_periods/std_weekly/std_total/extra/amount），
+    另加 week_detail:[(周次, 上课天数, 该周实际, 该周请假, 该周标准, 该周超课时)]"""
+    sem = db.session.get(Semester, sid)
+    base = sem.start_date - timedelta(days=(sem.start_date.weekday() + 1) % 7) if sem else start
+    if days is None:
+        days = calendar_class_days(sid, start, end)
+    days_by_week = {}
+    for (d, eff, taught) in days:
+        days_by_week.setdefault(_week_no(d, base), []).append((d, eff, taught))
+    leave_map = _leave_map(sid)
+    wdc = _workdays_per_week()
+    unit = int(get_setting_float('extra_hour_unit_price', 0) + 0.5)
+    if teachers is None:
+        teachers = Teacher.query.filter_by(semester_id=sid, is_active=True).order_by(Teacher.name).all()
+    rows = []
+    for t in teachers:
+        slots = _slot_weights(sid, t.id)
+        weekly_raw = sum(slots.values())
+        std_weekly = position_std_hours(t.position)
+        detail, extra_total, act_total, leave_total, std_total = [], 0.0, 0, 0, 0.0
+        for wno in sorted(days_by_week):
+            wdays = days_by_week[wno]
+            act = 0.0
+            lv = 0
+            for (d, eff, taught) in wdays:
+                for (wd, p), wt in slots.items():
+                    if wd == eff and p in taught:
+                        act += wt
+                lv += leave_map.get((t.id, d), 0)
+            net = max(0.0, act - lv)
+            std_w = (std_weekly * len(wdays) / wdc) if prorate else std_weekly
+            ex = max(0.0, net - std_w)
+            detail.append((wno, len(wdays), round(net, 2), lv, round(std_w, 2), round(ex, 2)))
+            extra_total += ex
+            act_total += net
+            leave_total += lv
+            std_total += std_w
+        extra = round(extra_total, 2)
+        rows.append({'teacher': t, 'weekly_raw': _int_if_whole(round(weekly_raw, 2)),
+                     'weekly_coef': _int_if_whole(round(weekly_raw, 2)),
+                     'actual': _int_if_whole(round(act_total, 2)),
+                     'leave_periods': leave_total,
+                     'std_weekly': _int_if_whole(std_weekly),
+                     'std_total': _int_if_whole(round(std_total, 2)),
+                     'extra': _int_if_whole(extra), 'amount': round(extra * unit, 2),
+                     'week_detail': detail})
+    rows.sort(key=lambda r: -r['extra'])
+    meta = {'days': days, 'days_by_week': days_by_week, 'prorate': prorate,
+            'class_day_count': len(days), 'base': base}
+    return rows, meta
+
 
 @app.route('/standards')
 @login_required
@@ -3870,6 +4020,25 @@ def holidays_page():
 def holidays_add():
     hd = request.form.get('holiday_date', '').strip()
     name = request.form.get('name', '').strip() or '放假'
+    # 停课节次：all=全天（默认）/ from=第X节起 / range=第X~Y节
+    pmode = request.form.get('period_mode', 'all')
+    try:
+        p_from = int(request.form.get('period_from', '') or 0) or None
+    except Exception:
+        p_from = None
+    try:
+        p_to = int(request.form.get('period_to', '') or 0) or None
+    except Exception:
+        p_to = None
+    if pmode == 'all':
+        p_from = p_to = None
+    elif pmode == 'from':
+        p_to = None
+    if pmode in ('from', 'range') and not p_from:
+        flash('请填写停课起始节次')
+        return redirect(request.referrer or url_for('holidays_page'))
+    if pmode == 'range' and not p_to:
+        p_to = p_from
     try:
         d = datetime.strptime(hd, '%Y-%m-%d').date()
     except Exception:
@@ -3883,7 +4052,8 @@ def holidays_add():
         flash('该日期已在停课名单中')
         return redirect(request.referrer or url_for('holidays_page'))
     db.session.add(Holiday(semester_id=get_current_semester_id(), holiday_date=d,
-                           name=name, remark=request.form.get('remark', '').strip()))
+                           name=name, remark=request.form.get('remark', '').strip(),
+                           period_from=p_from, period_to=p_to))
     db.session.commit()
     flash('停课日已添加')
     return redirect(url_for('holidays_page'))
@@ -3905,11 +4075,18 @@ def holidays_delete(hid):
 @app.route('/school-days/add', methods=['POST'])
 @admin_required
 def school_days_add():
-    """添加上课日（调休补课）：mode=date 具体日期 / mode=weekday 星期几规律"""
+    """添加上课日（调休补课）：mode=date 具体日期 / mode=weekday 星期几规律
+    follow_weekday：该日按周几的课表上课（空=按本日星期）"""
     sid = get_current_semester_id()
     mode = request.form.get('mode', 'date')
     name = request.form.get('name', '').strip() or '补课'
     remark = request.form.get('remark', '').strip()
+    try:
+        fwd = int(request.form.get('follow_weekday', '') or 0) or None
+    except Exception:
+        fwd = None
+    if fwd is not None and not (1 <= fwd <= 7):
+        fwd = None
     if mode == 'weekday':
         # 星期几规律：可多选，每条一个 weekday
         wkds = [int(w) for w in request.form.getlist('weekdays') if w.isdigit() and 1 <= int(w) <= 7]
@@ -3920,7 +4097,8 @@ def school_days_add():
         for wd in sorted(set(wkds)):
             if SchoolDay.query.filter_by(semester_id=sid, weekday=wd).first():
                 continue
-            db.session.add(SchoolDay(semester_id=sid, weekday=wd, name=name, remark=remark))
+            db.session.add(SchoolDay(semester_id=sid, weekday=wd, name=name, remark=remark,
+                                     follow_weekday=fwd))
             added += 1
         db.session.commit()
         flash(f'已添加 {added} 条上课日规律' if added else '所选星期几已在上课日名单中')
@@ -3938,7 +4116,8 @@ def school_days_add():
         if SchoolDay.query.filter_by(semester_id=sid, day_date=d).first():
             flash('该日期已在上课日名单中')
             return redirect(request.referrer or url_for('holidays_page'))
-        db.session.add(SchoolDay(semester_id=sid, day_date=d, name=name, remark=remark))
+        db.session.add(SchoolDay(semester_id=sid, day_date=d, name=name, remark=remark,
+                                 follow_weekday=fwd))
         db.session.commit()
         flash('上课日已添加')
     return redirect(url_for('holidays_page'))
@@ -3973,38 +4152,16 @@ def _int_if_whole(v):
 
 
 def workload_rows(sid):
-    """超课时统计明细行（无学科系数，上一节算一节，全部整数）"""
+    """超课时统计明细行（整学期视图，逐周口径 + 校历感知：停课日/补课日参与计算）"""
     if not sid:
         return [], 0
     sem = db.session.get(Semester, sid) if sid else None
-    weeks = sem.effective_weeks() if sem else 0
-    teachers = Teacher.query.filter_by(semester_id=sid, is_active=True).order_by(Teacher.name).all()
-    rows = []
-    for t in teachers:
-        cells = ScheduleCell.query.filter_by(semester_id=sid, teacher_id=t.id).all()
-        # 合班课同一节次只计一次：按 (周几, 节次) 归并，同一节次取最大权重
-        # （原来按 task_id/class_id 去重，合班两班的 cell 会各算一次，周课时翻倍虚高）
-        slot_w = {}
-        for c in cells:
-            key = (c.weekday, c.period)
-            wt = 1.0 if c.week_type == 'every' else 0.5
-            if wt > slot_w.get(key, 0):
-                slot_w[key] = wt
-        weekly_raw = sum(slot_w.values())
-        # 请假扣减：已通过的请假节次（含看课的），直接扣实际课时
-        leaves = LeaveRequest.query.filter_by(semester_id=sid, teacher_id=t.id, status='approved').all()
-        leave_periods = sum(len(l.period_list()) for l in leaves)
-        actual = max(0, round(weekly_raw * weeks) - leave_periods)
-        std_weekly = position_std_hours(t.position)
-        std_total = round(std_weekly * weeks)
-        extra = max(0, actual - std_total)
-        amount = extra * int(get_setting_float('extra_hour_unit_price', 0) + 0.5)
-        rows.append({'teacher': t, 'weekly_raw': _int_if_whole(round(weekly_raw, 2)),
-                     'weekly_coef': _int_if_whole(round(weekly_raw, 2)), 'weeks': weeks,
-                     'actual': actual, 'leave_periods': leave_periods,
-                     'std_weekly': _int_if_whole(std_weekly), 'std_total': std_total,
-                     'extra': extra, 'amount': amount})
-    rows.sort(key=lambda r: -r['extra'])
+    if not sem:
+        return [], 0
+    weeks = sem.effective_weeks()
+    rows, _meta = _workload_calc(sid, sem.start_date, sem.end_date)
+    for r in rows:
+        r['weeks'] = weeks
     return rows, weeks
 
 
@@ -4082,7 +4239,8 @@ def _teacher_weekly_coef(sid, tid):
 
 
 def workload_period_rows(sid, pno):
-    """按 4 周周期统计超课时：每位教师 周期实际/标准/超课时/金额"""
+    """按 4 周周期统计超课时：每位教师 周期实际/标准/超课时/金额
+    （逐周口径 + 校历感知：停课日剔除、补课日按 follow_weekday、标准按上课天数折算）"""
     if not sid:
         return [], []
     sem = db.session.get(Semester, sid) if sid else None
@@ -4091,25 +4249,9 @@ def workload_period_rows(sid, pno):
     if not target:
         return [], periods
     _, p_start, p_end, eff_weeks = target
-    unit = get_setting_float('extra_hour_unit_price', 0)
-    teachers = Teacher.query.filter_by(semester_id=sid, is_active=True).order_by(Teacher.name).all()
-    rows = []
-    for t in teachers:
-        weekly_raw, weekly_coef = _teacher_weekly_coef(sid, t.id)
-        leaves = LeaveRequest.query.filter_by(semester_id=sid, teacher_id=t.id, status='approved') \
-            .filter(LeaveRequest.leave_date >= p_start, LeaveRequest.leave_date <= p_end).all()
-        leave_periods = sum(len(l.period_list()) for l in leaves)
-        actual = max(0, round(weekly_raw * eff_weeks) - leave_periods)
-        std_weekly = position_std_hours(t.position)
-        std_total = round(std_weekly * eff_weeks)
-        extra = max(0, actual - std_total)
-        amount = extra * int(get_setting_float('extra_hour_unit_price', 0) + 0.5)
-        rows.append({'teacher': t, 'weekly_raw': _int_if_whole(weekly_raw),
-                     'weekly_coef': _int_if_whole(weekly_coef), 'weeks': eff_weeks,
-                     'actual': actual, 'leave_periods': leave_periods,
-                     'std_weekly': _int_if_whole(std_weekly), 'std_total': std_total,
-                     'extra': extra, 'amount': amount})
-    rows.sort(key=lambda r: -r['extra'])
+    rows, _meta = _workload_calc(sid, p_start, p_end)
+    for r in rows:
+        r['weeks'] = eff_weeks
     return rows, periods
 
 
@@ -4132,19 +4274,22 @@ def workload_page():
                 cur_period = period_nos[-1] if period_nos else 1
         rows, periods = workload_period_rows(sid, cur_period)
         p_weeks = [p for p in periods if p[0] == cur_period]
+        cdays = calendar_class_days(sid, p_weeks[0][1], p_weeks[0][2]) if p_weeks else []
         total_extra = round(sum(r['extra'] for r in rows), 2)
         total_amount = round(sum(r['amount'] for r in rows), 2)
         return render_template('workload.html', rows=rows, weeks=0, view='period',
                                total_extra=total_extra, total_amount=total_amount, unit=unit,
                                period_nos=period_nos, cur_period=cur_period, p_weeks=p_weeks,
+                               cdays=cdays, prorate=True,
                                classes=[], cid=None, grid={}, teachers=[], p_rows=[])
     # 按周（整学期）视图
     rows, weeks = workload_rows(sid)
+    cdays = calendar_class_days(sid, sem.start_date, sem.end_date) if sem else []
     total_extra = sum(r['extra'] for r in rows)
     total_amount = round(sum(r['amount'] for r in rows), 2)
     return render_template('workload.html', rows=rows, weeks=weeks, view='week',
                            total_extra=round(total_extra, 2), total_amount=total_amount, unit=unit,
-                           period_nos=[], cur_period=1, p_weeks=[],
+                           period_nos=[], cur_period=1, p_weeks=[], cdays=cdays, prorate=True,
                            classes=[], cid=None, grid={}, teachers=[], p_rows=[])
 
 
@@ -4154,32 +4299,62 @@ def workload_export():
     from openpyxl import Workbook
     from openpyxl.styles import Font, Alignment, PatternFill
     sid = get_current_semester_id()
-    rows, weeks = workload_rows(sid)
     sem = get_semester()
+    view = request.args.get('view', 'week')
+    p_str = request.args.get('period', '')
+    unit = get_setting_float('extra_hour_unit_price', 0)
+    if view == 'period' and p_str.isdigit():
+        rows, periods = workload_period_rows(sid, int(p_str))
+        pw = next((p for p in periods if p[0] == int(p_str)), None)
+        weeks = pw[3] if pw else 0
+        days = calendar_class_days(sid, pw[1], pw[2]) if pw else []
+        scope = ('第 %s 周期（%s ~ %s，实际上课 %d 天，上课日：%s）'
+                 % (p_str, pw[1].strftime('%Y-%m-%d'), pw[2].strftime('%Y-%m-%d'), len(days),
+                    '、'.join(d.strftime('%m-%d') for d, _e, _t in days))) if pw else '（周期不存在）'
+        fname = f'超课时统计_第{p_str}周期_{datetime.now().strftime("%Y%m%d")}.xlsx'
+    else:
+        rows, weeks = workload_rows(sid)
+        days = calendar_class_days(sid, sem.start_date, sem.end_date) if sem else []
+        scope = '整学期 · 实际上课 %d 天' % len(days)
+        fname = f'超课时统计_{datetime.now().strftime("%Y%m%d")}.xlsx'
     wb = Workbook()
     ws = wb.active
     ws.title = '超课时统计'
     school = get_setting('school_name', '')
     ws.append([f'{school} 超课时统计表'])
-    ws.append([f'学期：{sem.name if sem else ""}    有效教学周数：{weeks}    超课时单价：{get_setting_float("extra_hour_unit_price", 0)} 元/节'])
+    ws.append([f'学期：{sem.name if sem else ""}    {scope}    超课时单价：{unit} 元/节'])
     ws.append([])
     ws.append(['教师', '职务', '学科类别', '周课时(课表)', '有效周数',
-               '学期实际课时', '请假扣减', '职务周标准', '标准课时', '超课时', '金额(元)'])
+               '实际课时', '请假扣减', '职务周标准', '标准课时', '超课时', '金额(元)',
+               '逐周明细(周:上课天数/实际/请假/标准/超课时)'])
     for r in rows:
         ws.append([r['teacher'].name, r['teacher'].position, r['teacher'].subject_category,
                    r['weekly_raw'], r['weeks'], r['actual'],
-                   r['leave_periods'], r['std_weekly'], r['std_total'], r['extra'], r['amount']])
+                   r['leave_periods'], r['std_weekly'], r['std_total'], r['extra'], r['amount'],
+                   '  '.join(f"{w}:{d}/{a}/{l}/{s}/{e}" for (w, d, a, l, s, e) in r.get('week_detail', []))])
     ws.append(['合计', '', '', '', '', '', '', '', '',
-               round(sum(r['extra'] for r in rows), 2), round(sum(r['amount'] for r in rows), 2)])
+               round(sum(r['extra'] for r in rows), 2), round(sum(r['amount'] for r in rows), 2), ''])
     _apply_uniform_style(ws, header_row=4)
     for c in ws[ws.max_row]:
         c.font = Font(name='宋体', size=11, bold=True)
-    for col, w in zip('ABCDEFGHIJK', [10, 12, 10, 12, 9, 12, 10, 10, 10, 9, 10]):
+    for col, w in zip('ABCDEFGHIJKL', [10, 12, 10, 12, 9, 11, 10, 10, 10, 9, 10, 60]):
         ws.column_dimensions[col].width = w
+    # 逐周明细 sheet（校历口径可逐周核对）
+    if any(r.get('week_detail') for r in rows):
+        ws2 = wb.create_sheet('逐周明细')
+        ws2.append(['教师', '职务', '周次', '该周上课天数', '该周实际课时', '该周请假',
+                    '该周标准课时', '该周超课时', '周超课时金额'])
+        for r in rows:
+            for (w, dc, act, lv, std, ex) in r.get('week_detail', []):
+                ws2.append([r['teacher'].name, r['teacher'].position, f'第{w}周', dc, act, lv,
+                            std, ex, round(ex * unit, 2)])
+        _apply_uniform_style(ws2, header_row=1)
+        for col, w in zip('ABCDEFGHI', [10, 12, 9, 12, 12, 10, 12, 11, 12]):
+            ws2.column_dimensions[col].width = w
     bio = io.BytesIO()
     wb.save(bio)
     bio.seek(0)
-    return send_file(bio, as_attachment=True, download_name=f'超课时统计_{datetime.now().strftime("%Y%m%d")}.xlsx',
+    return send_file(bio, as_attachment=True, download_name=fname,
                      mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
 
 # ══════════════════════════════════════════════
@@ -5433,6 +5608,14 @@ def _run_db_migrations():
             cur.execute("UPDATE order_plan SET book_type='major' WHERE major != '' AND major IS NOT NULL")
         except Exception:
             pass
+        # 校历接超课时：停课日的停课节次范围 + 上课日按周几的课表
+        for tbl, col, typ in [('holiday', 'period_from', 'INTEGER'),
+                              ('holiday', 'period_to', 'INTEGER'),
+                              ('school_day', 'follow_weekday', 'INTEGER')]:
+            try:
+                cur.execute(f'ALTER TABLE {tbl} ADD COLUMN {col} {typ} DEFAULT NULL')
+            except Exception:
+                pass  # 已存在
         conn.commit()
         conn.close()
     except Exception:

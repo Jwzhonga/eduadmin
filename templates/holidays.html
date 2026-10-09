@@ -16,6 +16,8 @@
     当前学期有效教学周数：<strong>{{ current_semester.effective_weeks() }}</strong> 周
     （{{ current_semester.start_date.strftime('%Y-%m-%d') }} ~ {{ current_semester.end_date.strftime('%Y-%m-%d') }}，
     按自然周计算，放假停课也按整周计{% if current_semester.teaching_weeks %}；学期中手动指定为 {{ current_semester.effective_weeks() }} 周{% endif %}）
+    <br><i class="fas fa-chart-bar" style="color:#34c759"></i>
+    停课日 / 上课日（补课）会参与「超课时统计」的实际课时计算：整天停课当天不计课时、半天停课只剔对应节次、补课日按指定周几的课表计入。
 </div>
 {% endif %}
 
@@ -36,6 +38,7 @@
                     <th>日期</th>
                     <th>星期</th>
                     <th>名称</th>
+                    <th>停课范围</th>
                     <th>备注</th>
                     {% if current_user and current_user.role == 'admin' %}<th style="width:80px" data-no-sort>操作</th>{% endif %}
                 </tr>
@@ -47,6 +50,7 @@
                     <td>{{ r.holiday_date.strftime('%Y-%m-%d') }}</td>
                     <td>{{ ['周一','周二','周三','周四','周五','周六','周日'][r.holiday_date.weekday()] }}</td>
                     <td>{{ r.name }}</td>
+                    <td>{% if r.period_from %}<span class="badge text-bg-warning">第{{ r.period_from }}节{% if r.period_to %}~{{ r.period_to }}节{% else %}起{% endif %}</span>{% else %}<span class="badge text-bg-danger">全天</span>{% endif %}</td>
                     <td>{{ r.remark }}</td>
                     {% if current_user and current_user.role == 'admin' %}
                     <td>
@@ -55,7 +59,7 @@
                     {% endif %}
                 </tr>
                 {% else %}
-                <tr><td colspan="6" class="text-center text-muted py-4">暂无停课日记录（法定节假日、运动会、全校活动等）</td></tr>
+                <tr><td colspan="7" class="text-center text-muted py-4">暂无停课日记录（法定节假日、运动会、全校活动等）</td></tr>
                 {% endfor %}
             </tbody>
         </table>
@@ -74,6 +78,7 @@
                     <th>类型</th>
                     <th>日期 / 星期</th>
                     <th>名称</th>
+                    <th>按课表</th>
                     <th>备注</th>
                     {% if current_user and current_user.role == 'admin' %}<th style="width:80px" data-no-sort>操作</th>{% endif %}
                 </tr>
@@ -89,6 +94,7 @@
                     <td><span class="badge text-bg-primary">星期规律</span></td>
                     <td>每周{{ ['一','二','三','四','五','六','日'][r.weekday - 1] }}</td>
                     {% endif %}
+                    <td>{% if r.follow_weekday %}<span class="badge text-bg-info">按周{{ ['一','二','三','四','五','六','日'][r.follow_weekday - 1] }}课表</span>{% else %}<span class="text-muted">本日</span>{% endif %}</td>
                     <td>{{ r.name }}</td>
                     <td>{{ r.remark }}</td>
                     {% if current_user and current_user.role == 'admin' %}
@@ -98,7 +104,7 @@
                     {% endif %}
                 </tr>
                 {% else %}
-                <tr><td colspan="6" class="text-center text-muted py-4">暂无上课日记录（调休补课、周末补课等）</td></tr>
+                <tr><td colspan="7" class="text-center text-muted py-4">暂无上课日记录（调休补课、周末补课等）</td></tr>
                 {% endfor %}
             </tbody>
         </table>
@@ -116,6 +122,25 @@
             <div class="modal-body">
                 <div class="mb-2"><label class="form-label">日期</label><input type="date" class="form-control form-control-sm" name="holiday_date" required></div>
                 <div class="mb-2"><label class="form-label">名称</label><input class="form-control form-control-sm" name="name" placeholder="如：国庆节放假" value="放假"></div>
+                <div class="mb-2">
+                    <label class="form-label">停课范围</label>
+                    <div class="btn-group w-100 btn-group-sm" role="group">
+                        <input type="radio" class="btn-check" name="period_mode" id="hdModeAll" value="all" checked>
+                        <label class="btn btn-outline-primary" for="hdModeAll">全天</label>
+                        <input type="radio" class="btn-check" name="period_mode" id="hdModeFrom" value="from">
+                        <label class="btn btn-outline-primary" for="hdModeFrom">第X节起</label>
+                        <input type="radio" class="btn-check" name="period_mode" id="hdModeRange" value="range">
+                        <label class="btn btn-outline-primary" for="hdModeRange">第X~Y节</label>
+                    </div>
+                    <div id="hdRangeWrap" style="display:none;margin-top:6px" class="d-flex align-items-center gap-2">
+                        <span style="font-size:12px;color:#86868b">第</span>
+                        <input type="number" min="1" max="12" class="form-control form-control-sm" style="width:64px" name="period_from" placeholder="7">
+                        <span id="hdToLabel" style="font-size:12px;color:#86868b">节起</span>
+                        <input type="number" min="1" max="12" class="form-control form-control-sm" style="width:64px" name="period_to" id="hdToInput" placeholder="末节">
+                        <span style="font-size:12px;color:#86868b" id="hdToTail">节</span>
+                    </div>
+                    <div class="form-text">半天停课（如运动会第七节起）用「第X节起」；整天停课保持「全天」</div>
+                </div>
                 <div class="mb-2"><label class="form-label">备注</label><input class="form-control form-control-sm" name="remark"></div>
             </div>
             <div class="modal-footer">
@@ -159,6 +184,16 @@
                         {% endfor %}
                     </div>
                 </div>
+                <div class="mb-2">
+                    <label class="form-label">按周几的课表上课</label>
+                    <select class="form-select form-select-sm" name="follow_weekday">
+                        <option value="">按本日（默认）</option>
+                        {% for w in range(1, 8) %}
+                        <option value="{{ w }}">按周{{ ['一','二','三','四','五','六','日'][w - 1] }}的课表</option>
+                        {% endfor %}
+                    </select>
+                    <div class="form-text">补课日若上的是别的星期几的课（如周六补上星期三的课），在这里指定</div>
+                </div>
                 <div class="mb-2"><label class="form-label">名称</label><input class="form-control form-control-sm" name="name" placeholder="如：国庆调休补课" value="补课"></div>
                 <div class="mb-2"><label class="form-label">备注</label><input class="form-control form-control-sm" name="remark"></div>
             </div>
@@ -191,6 +226,29 @@
         var wd = d.getDay(); // 0=周日
         el.textContent = '该日是 ' + WEEK[(wd + 6) % 7];
     });
+    // 停课范围：全天 / 第X节起 / 第X~Y节
+    function syncHdRange() {
+        var wrap = document.getElementById('hdRangeWrap');
+        if (!wrap) return;
+        var m = document.querySelector('input[name="period_mode"]:checked');
+        var mode = m ? m.value : 'all';
+        wrap.style.display = (mode === 'all') ? 'none' : 'flex';
+        var toInput = document.getElementById('hdToInput');
+        var toLabel = document.getElementById('hdToLabel');
+        var toTail = document.getElementById('hdToTail');
+        if (!toInput) return;
+        if (mode === 'from') {
+            toInput.style.display = 'none'; toTail.style.display = 'none';
+            toLabel.textContent = '节起（到当天最后一节）';
+        } else {
+            toInput.style.display = ''; toTail.style.display = '';
+            toLabel.textContent = '节 ~ 第';
+        }
+    }
+    document.querySelectorAll('input[name="period_mode"]').forEach(function(el) {
+        el.addEventListener('change', syncHdRange);
+    });
+    syncHdRange();
 })();
 </script>
 {% endblock %}

@@ -7,7 +7,7 @@
             <a class="btn {% if view == 'period' %}btn-primary{% else %}btn-outline-secondary{% endif %}" href="/workload?view=period">按4周周期</a>
             <a class="btn {% if view == 'week' %}btn-primary{% else %}btn-outline-secondary{% endif %}" href="/workload?view=week">按整学期</a>
         </div>
-        <a href="/workload/export" class="btn btn-sm btn-success"><i class="fas fa-file-excel"></i> 导出</a>
+        <a href="/workload/export{% if view == 'period' %}?view=period&period={{ cur_period }}{% endif %}" class="btn btn-sm btn-success"><i class="fas fa-file-excel"></i> 导出</a>
     </div>
 </div>
 
@@ -29,6 +29,7 @@
         {% if p_weeks %}
         <span class="text-muted" style="font-size:12px">{{ p_weeks[0][1].strftime('%m-%d') }} ~ {{ p_weeks[0][2].strftime('%m-%d') }}（有效 {{ p_weeks[0][3] }} 周）</span>
         {% endif %}
+        <span class="badge text-bg-secondary" title="{% for d, e, t in cdays %}{{ d.strftime('%m-%d') }}(周{{ ['一','二','三','四','五','六','日'][e-1] }}{% if t|length < 7 %}·部分{% endif %}) {% endfor %}">实际上课 {{ cdays|length }} 天</span>
         <span class="ms-auto" style="font-size:13px">
             <span class="badge text-bg-primary">超课时 {{ total_extra }} 节</span>
             <span class="badge text-bg-success">金额 {{ total_amount }} 元</span>
@@ -45,6 +46,7 @@
                 <th>周期标准课时</th>
                 <th>超课时</th>
                 <th>金额(元)</th>
+                <th>逐周明细</th>
             </tr></thead>
             <tbody>
                 {% for r in rows %}
@@ -57,9 +59,12 @@
                     <td>{{ r.std_total }}</td>
                     <td><strong>{{ r.extra }}</strong></td>
                     <td>{{ r.amount }}</td>
+                    <td style="font-size:11px;color:#86868b;white-space:nowrap">
+                        {% for w, d, a, l, s, e in r.week_detail %}<span title="第{{ w }}周：上课{{ d }}天 / 实际{{ a }} / 请假{{ l }} / 标准{{ s }}">{{ a }}{% if e %}<b style="color:#ff3b30">+{{ e }}</b>{% endif %}</span>{% if not loop.last %} · {% endif %}{% endfor %}
+                    </td>
                 </tr>
                 {% else %}
-                <tr><td colspan="8" class="text-center text-muted py-4">本周期暂无数据</td></tr>
+                <tr><td colspan="9" class="text-center text-muted py-4">本周期暂无数据</td></tr>
                 {% endfor %}
             </tbody>
             <tfoot>
@@ -67,6 +72,7 @@
                     <td colspan="6" class="text-end"><strong>合计</strong></td>
                     <td><strong>{{ total_extra }}</strong></td>
                     <td><strong>{{ total_amount }}</strong></td>
+                    <td></td>
                 </tr>
             </tfoot>
         </table>
