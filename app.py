@@ -3880,11 +3880,11 @@ def _slot_weights(sid, tid):
 
 
 def _leave_map(sid):
-    """{(教师id, 日期): 请假节数}——已通过的请假"""
+    """{(教师id, 日期): [请假节次...]}——已通过的请假（保留重复，与原逐条累加口径一致）"""
     res = {}
     for l in LeaveRequest.query.filter_by(semester_id=sid, status='approved').all():
         k = (l.teacher_id, l.leave_date)
-        res[k] = res.get(k, 0) + len(l.period_list())
+        res.setdefault(k, []).extend(l.period_list())
     return res
 
 
@@ -3909,6 +3909,10 @@ def _workload_calc(sid, start, end, prorate=True, teachers=None, days=None):
     leave_map = _leave_map(sid)
     wdc = _workdays_per_week()
     unit = int(get_setting_float('extra_hour_unit_price', 0) + 0.5)
+    # 全库有效课表的星期几集合：某日按「本日星期」上课但课表里压根没有这天的课（如未指定 follow_weekday 的
+    # 周六补课日），该日不应计入标准的折算分母，否则会静默稀释标准（Pro 审计 2026-10-09 指出）
+    sched_wds = {r[0] for r in db.session.query(ScheduleCell.weekday)
+                 .filter_by(semester_id=sid).distinct().all()}
     if teachers is None:
         teachers = Teacher.query.filter_by(semester_id=sid, is_active=True).order_by(Teacher.name).all()
     rows = []
@@ -3925,9 +3929,12 @@ def _workload_calc(sid, start, end, prorate=True, teachers=None, days=None):
                 for (wd, p), wt in slots.items():
                     if wd == eff and p in taught:
                         act += wt
-                lv += leave_map.get((t.id, d), 0)
+                # 请假只扣「该日实际要上的节次」：停课节次上的请假不重复扣
+                lv += sum(1 for p in leave_map.get((t.id, d), []) if p in taught)
             net = max(0.0, act - lv)
-            std_w = (std_weekly * len(wdays) / wdc) if prorate else std_weekly
+            # 折算分母只数「课表里有这一天的课」的上课日
+            teach_days = sum(1 for (_d, _e, _t) in wdays if _e in sched_wds)
+            std_w = (std_weekly * teach_days / wdc) if prorate else std_weekly
             ex = max(0.0, net - std_w)
             detail.append((wno, len(wdays), round(net, 2), lv, round(std_w, 2), round(ex, 2)))
             extra_total += ex
@@ -4020,25 +4027,33 @@ def holidays_page():
 def holidays_add():
     hd = request.form.get('holiday_date', '').strip()
     name = request.form.get('name', '').strip() or '放假'
-    # 停课节次：all=全天（默认）/ from=第X节起 / range=第X~Y节
+    # 停课节次：all=全天（默认）/ from=第X节起 / range=第X~Y节（范围按当天节数钳制、反序自动纠正）
     pmode = request.form.get('period_mode', 'all')
-    try:
-        p_from = int(request.form.get('period_from', '') or 0) or None
-    except Exception:
-        p_from = None
-    try:
-        p_to = int(request.form.get('period_to', '') or 0) or None
-    except Exception:
-        p_to = None
+    if pmode not in ('all', 'from', 'range'):
+        pmode = 'all'
+    ppd = _periods_per_day()
+
+    def _clamp_period(v):
+        try:
+            v = int(v)
+        except Exception:
+            return None
+        return v if 1 <= v <= ppd else None
+
+    p_from = _clamp_period(request.form.get('period_from', ''))
+    p_to = _clamp_period(request.form.get('period_to', ''))
     if pmode == 'all':
         p_from = p_to = None
     elif pmode == 'from':
         p_to = None
     if pmode in ('from', 'range') and not p_from:
-        flash('请填写停课起始节次')
+        flash(f'请填写停课起始节次（1~{ppd}）')
         return redirect(request.referrer or url_for('holidays_page'))
-    if pmode == 'range' and not p_to:
-        p_to = p_from
+    if pmode == 'range':
+        if not p_to:
+            p_to = p_from
+        elif p_from is not None and p_to < p_from:
+            p_from, p_to = p_to, p_from
     try:
         d = datetime.strptime(hd, '%Y-%m-%d').date()
     except Exception:
@@ -5608,14 +5623,17 @@ def _run_db_migrations():
             cur.execute("UPDATE order_plan SET book_type='major' WHERE major != '' AND major IS NOT NULL")
         except Exception:
             pass
-        # 校历接超课时：停课日的停课节次范围 + 上课日按周几的课表
+        # 校历接超课时：停课日的停课节次范围 + 上课日按周几的课表（缺列才 ALTER，真失败要留痕）
         for tbl, col, typ in [('holiday', 'period_from', 'INTEGER'),
                               ('holiday', 'period_to', 'INTEGER'),
                               ('school_day', 'follow_weekday', 'INTEGER')]:
             try:
-                cur.execute(f'ALTER TABLE {tbl} ADD COLUMN {col} {typ} DEFAULT NULL')
-            except Exception:
-                pass  # 已存在
+                cols = [r[1] for r in cur.execute(f'PRAGMA table_info({tbl})').fetchall()]
+                if col not in cols:
+                    cur.execute(f'ALTER TABLE {tbl} ADD COLUMN {col} {typ} DEFAULT NULL')
+                    print(f'[migration] {tbl}.{col} 已新增')
+            except Exception as e:
+                print(f'[migration] {tbl}.{col} 迁移失败: {e}')
         conn.commit()
         conn.close()
     except Exception:
