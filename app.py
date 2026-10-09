@@ -1483,8 +1483,21 @@ def payments_read():
                 db.session.add(Payment(semester_id=sid, period_no=pno, teacher_id=tid,
                                        category=c, amount=round(amt, 2), source='auto'))
             total += 1
+    # 清理「已从数据源消失」的自动行：如放假/停课/调课撤销后某教师本期不再有该项目，
+    # 旧行若留着会静默多发钱（读取原来只增改不删，2026-10-09 审计发现）。只删 auto，绝不碰 manual。
+    cleaned = 0
+    for c in cats:
+        keep = set(data[c].keys())
+        q = Payment.query.filter_by(semester_id=sid, period_no=pno, category=c, source='auto')
+        if keep:
+            q = q.filter(~Payment.teacher_id.in_(keep))
+        for rec in q.all():
+            db.session.delete(rec)
+            cleaned += 1
     db.session.commit()
     msg = '已从其他项目读取：%s %d 条（第 %d 周期）' % ('、'.join(cats), total, pno)
+    if cleaned:
+        msg += '；清理了 %d 条已无来源的自动行' % cleaned
     if kept:
         msg += '；跳过 %d 条手工调整值（保留原金额，需覆盖请先删除该行）' % kept
     flash(msg)
