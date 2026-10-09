@@ -267,6 +267,7 @@ BREADCRUMB_MAP = {
     'payments_read': [('补助发放', '/payments')],
     'payments_save': [('补助发放', '/payments')],
     'payments_add': [('补助发放', '/payments')],
+    'payments_period_lock': [('补助发放', '/payments')],
     'payments_export': [('补助发放', '/payments')],
     'classes_page': [('基础数据', ''), ('班级管理', '/classes')],
     'teachers_page': [('基础数据', ''), ('教师管理', '/teachers')],
@@ -643,6 +644,17 @@ class Payment(db.Model):
     source = db.Column(db.String(8), default='auto')             # auto=从其他项目读取 manual=手动
     note = db.Column(db.String(64), default='')
     created_at = db.Column(db.DateTime, default=datetime.now)
+
+
+class PaidPeriod(db.Model):
+    """已发放周期防护：某周期补助已发放/已结算后打标记，
+    之后「读取 / 改金额 / 删行」都会被拦下（需先取消标记）——防误点把已发的账改掉"""
+    __tablename__ = 'paid_period'
+    id = db.Column(db.Integer, primary_key=True)
+    semester_id = db.Column(db.Integer, db.ForeignKey('semester.id'), nullable=False, index=True)
+    period_no = db.Column(db.Integer, nullable=False)
+    note = db.Column(db.String(128), default='')
+    paid_at = db.Column(db.DateTime, default=datetime.now)
 
 
 class OperationLog(db.Model):
@@ -1164,7 +1176,8 @@ def data_reset():
     _create_backup('reset_auto')  # 重置前自动备份
     models = [ClassInfo, Teacher, Course, Classroom, Textbook, OrderPlan, BookIssue,
               TeachingTask, ScheduleCell, LeaveRequest, NightShift, Overtime,
-              ManagementFee, OperationLog, BookStockLog, Holiday, SchoolDay, Semester, Payment]
+              ManagementFee, OperationLog, BookStockLog, Holiday, SchoolDay, Semester, Payment,
+              PaidPeriod]
     # 课时标准/学科系数属系统配置（与系统设置同），重置不删除
     for m in models:
         try:
@@ -1399,6 +1412,16 @@ def _payment_source(sid, pno):
     return data
 
 
+def _paid_period_map(sid):
+    """{周期号: PaidPeriod}——已标记「已发放」的周期"""
+    return {p.period_no: p for p in PaidPeriod.query.filter_by(semester_id=sid).all()}
+
+
+def _period_locked(sid, pno):
+    """该周期是否已标记已发放（已发放则禁止读取/改金额/删行）"""
+    return PaidPeriod.query.filter_by(semester_id=sid, period_no=pno).first() is not None
+
+
 @app.route('/payments')
 @login_required
 def payments_page():
@@ -1423,7 +1446,8 @@ def payments_page():
     return render_template('payments.html', period_nos=period_nos, cur=cur, grid=grid,
                            teachers=teachers, source_data=source_data,
                            period_range_str=period_range_str, categories=PAYMENT_CATEGORIES,
-                           manual_only=PAYMENT_MANUAL_ONLY)
+                           manual_only=PAYMENT_MANUAL_ONLY,
+                           locked=_period_locked(sid, cur), paid_periods=_paid_period_map(sid))
 
 
 @app.route('/payments/read', methods=['POST'])
@@ -1437,6 +1461,10 @@ def payments_read():
     pno = int(pno) if pno.isdigit() else 1
     cat = request.form.get('category', '').strip()
     force = request.form.get('force', '') == '1'
+    if _period_locked(sid, pno):
+        flash('第 %d 周期已标记为「已发放」：读取已被拦下。'
+              '如需重读，请先在第 %d 周期的「已发周期防护」里取消标记。' % (pno, pno))
+        return redirect(url_for('payments_page', period=pno))
     cats = [cat] if cat in PAYMENT_CATEGORIES else PAYMENT_CATEGORIES
     data = _payment_source(sid, pno)
     total = 0
@@ -1470,6 +1498,10 @@ def payments_save():
     sid = get_current_semester_id()
     pno = request.form.get('period', '1')
     pno = int(pno) if pno.isdigit() else 1
+    if _period_locked(sid, pno):
+        flash('第 %d 周期已标记为「已发放」：金额修改已被拦下。'
+              '如需修改，请先取消该周期的「已发放」标记。' % pno)
+        return redirect(url_for('payments_page', period=pno))
     saved = 0
     for key, val in request.form.items():
         if not key.startswith('amt_'):
@@ -1509,6 +1541,10 @@ def payments_add():
     sid = get_current_semester_id()
     pno = request.form.get('period', '1')
     pno = int(pno) if pno.isdigit() else 1
+    if _period_locked(sid, pno):
+        flash('第 %d 周期已标记为「已发放」：新增补助已被拦下。'
+              '如需新增，请先取消该周期的「已发放」标记。' % pno)
+        return redirect(url_for('payments_page', period=pno))
     cat = request.form.get('category', '').strip()
     tid = request.form.get('teacher_id', '').strip()
     amount = request.form.get('amount', '').strip()
@@ -1540,12 +1576,46 @@ def payments_delete(pid):
     rec = db.session.get(Payment, pid)
     if rec:
         pno = rec.period_no
+        if _period_locked(rec.semester_id, pno):
+            flash('第 %d 周期已标记为「已发放」：删除已被拦下。'
+                  '如需删除，请先取消该周期的「已发放」标记。' % pno)
+            return redirect(url_for('payments_page', period=pno))
         db.session.delete(rec)
         db.session.commit()
         flash('已删除该笔补助')
         return redirect(url_for('payments_page', period=pno))
     flash('记录不存在')
     return redirect(url_for('payments_page'))
+
+
+@app.route('/payments/period-lock', methods=['POST'])
+@admin_required
+def payments_period_lock():
+    """已发周期防护：标记/取消「已发放」。已发放周期禁止读取、改金额、删行。"""
+    sid = get_current_semester_id()
+    pno = request.form.get('period', '')
+    action = request.form.get('action', 'lock')
+    if not pno.isdigit():
+        flash('周期参数错误')
+        return redirect(url_for('payments_page'))
+    pno = int(pno)
+    rec = PaidPeriod.query.filter_by(semester_id=sid, period_no=pno).first()
+    if action == 'unlock':
+        if rec:
+            db.session.delete(rec)
+            db.session.commit()
+            flash('第 %d 周期已取消「已发放」标记，可以重新读取/修改了' % pno)
+        else:
+            flash('第 %d 周期本来就没有标记为已发放' % pno)
+    else:
+        if rec:
+            flash('第 %d 周期已经是「已发放」状态' % pno)
+        else:
+            db.session.add(PaidPeriod(semester_id=sid, period_no=pno,
+                                      note=request.form.get('note', '').strip()))
+            db.session.commit()
+            flash('第 %d 周期已标记为「已发放」：读取 / 改金额 / 删行都会被拦下' % pno)
+    return redirect(url_for('payments_page', period=pno))
 
 
 @app.route('/payments/export')
@@ -2301,7 +2371,7 @@ def semester_delete(sid):
     # 级联删除所有关联数据（子→父顺序）
     for m in (ScheduleCell, TeachingTask, BookIssue, OrderPlan, NightShift,
               LeaveRequest, Overtime, ManagementFee, Holiday, SchoolDay,
-              Payment, BookStockLog):
+              Payment, PaidPeriod, BookStockLog):
         m.query.filter_by(semester_id=sid).delete()
     ClassInfo.query.filter_by(semester_id=sid).delete()
     Teacher.query.filter_by(semester_id=sid).delete()
@@ -3892,13 +3962,14 @@ def _week_no(d, base):
     return ((d - base).days // 7) + 1
 
 
-def _workload_calc(sid, start, end, prorate=True, teachers=None, days=None):
-    """逐周超课时引擎（校历感知）：
+def _workload_calc(sid, start, end, prorate=False, teachers=None, days=None):
+    """逐周超课时引擎（校历感知，用户 2026-10-09 定的口径）：
       每周实际 = Σ 该周上课日 该教师该日有效课表节数（剔停课节次，合班只计一次）
-      每周标准 = 职务周标准 × (该周上课天数 ÷ 每周上课天数)   [prorate=False 用满标准]
-      超课时   = Σ 每周 max(0, 该周实际 − 该周请假 − 该周标准)
-    返回 (rows, meta)；rows 字段与旧版兼容（weekly_raw/weeks/actual/leave_periods/std_weekly/std_total/extra/amount），
-    另加 week_detail:[(周次, 上课天数, 该周实际, 该周请假, 该周标准, 该周超课时)]"""
+      每周未上课节数 = 该教师完整周课表节数 − 该周实际课时（运动会/放假没上的那些节）
+      每周标准 = 职务周标准（**不缩水**；prorate=True 时才按该周上课天数折算）
+      超课时   = Σ 每周 max(0, 该周实际 − 该周请假 − 该周标准)   ← 不够或刚好达到标准都不发
+    返回 (rows, meta)；rows 字段与旧版兼容，另加
+    week_detail:[(周次, 上课天数, 该周实际, 该周请假, 该周标准, 该周超课时, 该周未上课节数)]"""
     sem = db.session.get(Semester, sid)
     base = sem.start_date - timedelta(days=(sem.start_date.weekday() + 1) % 7) if sem else start
     if days is None:
@@ -3909,10 +3980,6 @@ def _workload_calc(sid, start, end, prorate=True, teachers=None, days=None):
     leave_map = _leave_map(sid)
     wdc = _workdays_per_week()
     unit = int(get_setting_float('extra_hour_unit_price', 0) + 0.5)
-    # 全库有效课表的星期几集合：某日按「本日星期」上课但课表里压根没有这天的课（如未指定 follow_weekday 的
-    # 周六补课日），该日不应计入标准的折算分母，否则会静默稀释标准（Pro 审计 2026-10-09 指出）
-    sched_wds = {r[0] for r in db.session.query(ScheduleCell.weekday)
-                 .filter_by(semester_id=sid).distinct().all()}
     if teachers is None:
         teachers = Teacher.query.filter_by(semester_id=sid, is_active=True).order_by(Teacher.name).all()
     rows = []
@@ -3920,7 +3987,7 @@ def _workload_calc(sid, start, end, prorate=True, teachers=None, days=None):
         slots = _slot_weights(sid, t.id)
         weekly_raw = sum(slots.values())
         std_weekly = position_std_hours(t.position)
-        detail, extra_total, act_total, leave_total, std_total = [], 0.0, 0, 0, 0.0
+        detail, extra_total, act_total, leave_total, std_total, absent_total = [], 0.0, 0, 0, 0.0, 0.0
         for wno in sorted(days_by_week):
             wdays = days_by_week[wno]
             act = 0.0
@@ -3932,15 +3999,16 @@ def _workload_calc(sid, start, end, prorate=True, teachers=None, days=None):
                 # 请假只扣「该日实际要上的节次」：停课节次上的请假不重复扣
                 lv += sum(1 for p in leave_map.get((t.id, d), []) if p in taught)
             net = max(0.0, act - lv)
-            # 折算分母只数「课表里有这一天的课」的上课日
-            teach_days = sum(1 for (_d, _e, _t) in wdays if _e in sched_wds)
-            std_w = (std_weekly * teach_days / wdc) if prorate else std_weekly
+            std_w = (std_weekly * len(wdays) / wdc) if prorate else std_weekly
             ex = max(0.0, net - std_w)
-            detail.append((wno, len(wdays), round(net, 2), lv, round(std_w, 2), round(ex, 2)))
+            absent = max(0.0, weekly_raw - act)          # 该周未上课节数（课表口径）
+            detail.append((wno, len(wdays), round(net, 2), lv, round(std_w, 2),
+                           round(ex, 2), round(absent, 2)))
             extra_total += ex
             act_total += net
             leave_total += lv
             std_total += std_w
+            absent_total += absent
         extra = round(extra_total, 2)
         rows.append({'teacher': t, 'weekly_raw': _int_if_whole(round(weekly_raw, 2)),
                      'weekly_coef': _int_if_whole(round(weekly_raw, 2)),
@@ -3949,6 +4017,7 @@ def _workload_calc(sid, start, end, prorate=True, teachers=None, days=None):
                      'std_weekly': _int_if_whole(std_weekly),
                      'std_total': _int_if_whole(round(std_total, 2)),
                      'extra': _int_if_whole(extra), 'amount': round(extra * unit, 2),
+                     'absent_periods': _int_if_whole(round(absent_total, 2)),
                      'week_detail': detail})
     rows.sort(key=lambda r: -r['extra'])
     meta = {'days': days, 'days_by_week': days_by_week, 'prorate': prorate,
@@ -4340,31 +4409,32 @@ def workload_export():
     ws.append([f'学期：{sem.name if sem else ""}    {scope}    超课时单价：{unit} 元/节'])
     ws.append([])
     ws.append(['教师', '职务', '学科类别', '周课时(课表)', '有效周数',
-               '实际课时', '请假扣减', '职务周标准', '标准课时', '超课时', '金额(元)',
-               '逐周明细(周:上课天数/实际/请假/标准/超课时)'])
+               '实际课时', '未上课节数', '请假扣减', '职务周标准', '标准课时', '超课时', '金额(元)',
+               '逐周明细(周:上课天数/实际/请假/未上课/标准/超课时)'])
     for r in rows:
         ws.append([r['teacher'].name, r['teacher'].position, r['teacher'].subject_category,
-                   r['weekly_raw'], r['weeks'], r['actual'],
+                   r['weekly_raw'], r['weeks'], r['actual'], r['absent_periods'],
                    r['leave_periods'], r['std_weekly'], r['std_total'], r['extra'], r['amount'],
-                   '  '.join(f"{w}:{d}/{a}/{l}/{s}/{e}" for (w, d, a, l, s, e) in r.get('week_detail', []))])
-    ws.append(['合计', '', '', '', '', '', '', '', '',
+                   '  '.join(f"{w}:{d}/{a}/{l}/{ab}/{s}/{e}"
+                             for (w, d, a, l, s, e, ab) in r.get('week_detail', []))])
+    ws.append(['合计', '', '', '', '', '', '', '', '', '',
                round(sum(r['extra'] for r in rows), 2), round(sum(r['amount'] for r in rows), 2), ''])
     _apply_uniform_style(ws, header_row=4)
     for c in ws[ws.max_row]:
         c.font = Font(name='宋体', size=11, bold=True)
-    for col, w in zip('ABCDEFGHIJKL', [10, 12, 10, 12, 9, 11, 10, 10, 10, 9, 10, 60]):
+    for col, w in zip('ABCDEFGHIJKLM', [10, 12, 10, 12, 9, 11, 11, 10, 10, 10, 9, 10, 56]):
         ws.column_dimensions[col].width = w
     # 逐周明细 sheet（校历口径可逐周核对）
     if any(r.get('week_detail') for r in rows):
         ws2 = wb.create_sheet('逐周明细')
         ws2.append(['教师', '职务', '周次', '该周上课天数', '该周实际课时', '该周请假',
-                    '该周标准课时', '该周超课时', '周超课时金额'])
+                    '该周未上课节数', '该周标准课时', '该周超课时', '周超课时金额'])
         for r in rows:
-            for (w, dc, act, lv, std, ex) in r.get('week_detail', []):
+            for (w, dc, act, lv, std, ex, ab) in r.get('week_detail', []):
                 ws2.append([r['teacher'].name, r['teacher'].position, f'第{w}周', dc, act, lv,
-                            std, ex, round(ex * unit, 2)])
+                            ab, std, ex, round(ex * unit, 2)])
         _apply_uniform_style(ws2, header_row=1)
-        for col, w in zip('ABCDEFGHI', [10, 12, 9, 12, 12, 10, 12, 11, 12]):
+        for col, w in zip('ABCDEFGHIJ', [10, 12, 9, 12, 12, 10, 12, 12, 11, 12]):
             ws2.column_dimensions[col].width = w
     bio = io.BytesIO()
     wb.save(bio)

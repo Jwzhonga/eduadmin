@@ -43,6 +43,7 @@
                 <th>职务</th>
                 <th>周课时</th>
                 <th>周期实际课时</th>
+                <th>周期未上课节数</th>
                 <th>周期标准课时</th>
                 <th>超课时</th>
                 <th>金额(元)</th>
@@ -56,15 +57,16 @@
                     <td>{{ r.teacher.position or '' }}</td>
                     <td>{{ r.weekly_raw }}</td>
                     <td>{{ r.actual }}</td>
+                    <td>{% if r.absent_periods %}<span style="color:#ff9500">{{ r.absent_periods }}</span>{% else %}0{% endif %}</td>
                     <td>{{ r.std_total }}</td>
                     <td><strong>{{ r.extra }}</strong></td>
                     <td>{{ r.amount }}</td>
                     <td style="font-size:11px;color:#86868b;white-space:nowrap">
-                        {% for w, d, a, l, s, e in r.week_detail %}<span title="第{{ w }}周：上课{{ d }}天 / 实际{{ a }} / 请假{{ l }} / 标准{{ s }}">{{ a }}{% if e %}<b style="color:#ff3b30">+{{ e }}</b>{% endif %}</span>{% if not loop.last %} · {% endif %}{% endfor %}
+                        {% for w, d, a, l, s, e, ab in r.week_detail %}<span title="第{{ w }}周：上课{{ d }}天 / 该周实际{{ a }} / 请假{{ l }} / 未上课{{ ab }} / 标准{{ s }}">第{{ w }}周 实{{ a }} 缺{{ ab }}{% if e %} <b style="color:#ff3b30">超{{ e }}</b>{% endif %}</span>{% if not loop.last %} · {% endif %}{% endfor %}
                     </td>
                 </tr>
                 {% else %}
-                <tr><td colspan="9" class="text-center text-muted py-4">本周期暂无数据</td></tr>
+                <tr><td colspan="10" class="text-center text-muted py-4">本周期暂无数据</td></tr>
                 {% endfor %}
             </tbody>
             <tfoot>
@@ -72,6 +74,7 @@
                     <td colspan="6" class="text-end"><strong>合计</strong></td>
                     <td><strong>{{ total_extra }}</strong></td>
                     <td><strong>{{ total_amount }}</strong></td>
+                    <td></td>
                     <td></td>
                 </tr>
             </tfoot>
@@ -88,6 +91,7 @@
                 <th>周课时</th>
                 <th>有效周数</th>
                 <th>学期实际课时</th>
+                <th>学期未上课节数</th>
                 <th>请假扣减</th>
                 <th>职务周标准</th>
                 <th>标准课时</th>
@@ -104,6 +108,7 @@
                     <td>{{ r.weekly_raw }}</td>
                     <td>{{ r.weeks }}</td>
                     <td>{{ r.actual }}</td>
+                    <td>{% if r.absent_periods %}<span style="color:#ff9500">{{ r.absent_periods }}</span>{% else %}0{% endif %}</td>
                     <td>{{ r.leave_periods }}</td>
                     <td>{{ r.std_weekly }}</td>
                     <td>{{ r.std_total }}</td>
@@ -111,12 +116,13 @@
                     <td>{{ r.amount }}</td>
                 </tr>
                 {% else %}
-                <tr><td colspan="12" class="text-center text-muted py-4">暂无数据</td></tr>
+                <tr><td colspan="13" class="text-center text-muted py-4">暂无数据</td></tr>
                 {% endfor %}
             </tbody>
             <tfoot>
                 <tr class="table-light">
                     <td colspan="10" class="text-end"><strong>合计</strong></td>
+                    <td></td>
                     <td><strong>{{ total_extra }}</strong></td>
                     <td><strong>{{ total_amount }}</strong></td>
                 </tr>
